@@ -1,10 +1,13 @@
 import sys
 
 def calculate_ticket_price(age):
-    # --- เขียนโค้ดของนักเรียนในส่วนนี้ / Write your code here ---
-    pass
-    # --------------------------------------------------------
-
+        if age < 12:
+             return 120
+        elif age >= 12 and age <= 60:
+             return 200
+        elif age > 60:
+            return 150
+        
 def main():
     # เปลี่ยนมาเช็ก > 1 และใช้ sys.argv[-1] เพื่อความแม่นยำใน VPL
     if len(sys.argv) > 1:
