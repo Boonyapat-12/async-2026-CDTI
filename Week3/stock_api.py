@@ -1,4 +1,4 @@
-# mock_stock_api.py
+# stock_api.py
 from fastapi import FastAPI
 import asyncio
 
@@ -27,5 +27,14 @@ async def get_stock_price(server_name: str):
         "price_usd": price,
         "status": "success"
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8088)
+
+
 # pip install fastapi uvicorn httpx
-# วิธีรันเซิร์ฟเวอร์: uvicorn stock_api:app --reload --port 8088
+# วิธีรันเซิร์ฟเวอร์: python stock_api.py
+# หรือ uvicorn stock_api:app --reload --port 8088
