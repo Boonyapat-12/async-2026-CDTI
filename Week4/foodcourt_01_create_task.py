@@ -4,7 +4,7 @@ from time import ctime
 from food_utils import send_order_to_kitchen
 
 async def main():
-    MY_STUDENT_ID = "65010001"
+    MY_STUDENT_ID = "6710301033"
     print(f"{ctime()} | --- [Task 1] Practice using create_task to queue an order ---")
     
     # 1. Create a task for ordering chicken rice without awaiting it immediately.
