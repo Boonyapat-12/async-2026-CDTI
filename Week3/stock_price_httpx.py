@@ -2,8 +2,14 @@ import asyncio  # ใช้ asyncio สำหรับสร้าง task, wait
 import httpx  # ใช้ httpx.AsyncClient สำหรับยิง HTTP request แบบ async ไปยัง FastAPI server
 from time import ctime  # ใช้ ctime เพื่อแสดง timestamp ใน output
 
-async def fetch_stock_price(server_name: str):  # coroutine สำหรับดึงราคาหุ้นจริงผ่าน HTTP โดยรับชื่อ server เท่านั้น
-    url = f"http://127.0.0.1:8088/price/{server_name}"  # สร้าง URL ปลายทางตามชื่อ server เช่น /price/Beta
+async def fetch_stock_price(server_name: str):
+    """
+    TODO: Assignment 3 - เขียนฟังก์ชันเชื่อมต่อ Mock Server ผ่านระบบเครือข่าย
+    1. กำหนดเป้าหมายไปที่พอร์ต 8088 ตามสเปกเซิร์ฟเวอร์ของอาจารย์
+    2. ใช้ httpx.AsyncClient() ดึงข้อมูลเพื่อไม่ให้เกิดการ Block สัญญาณ Event Loop
+    3. นำข้อมูล JSON (server และ price_usd) มาจัดฟอร์แมตแสดงผล
+    """
+    url = f"http://127.0.0.1:8088/price/{server_name}"
     
     async with httpx.AsyncClient() as client:  # เปิด async HTTP client และปิดให้อัตโนมัติเมื่อใช้งานเสร็จ
         response = await client.get(url)  # ยิง GET request ไปยัง URL และรอ response แบบไม่บล็อก event loop
