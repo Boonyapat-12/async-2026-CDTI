@@ -7,6 +7,7 @@ import httpx
 from light_utils import (
     BASE_URL,
     LIGHT_IDS,
+    cleanup_lights,
     get_all_lights,
     reset_all_lights,
     set_light,
@@ -16,6 +17,7 @@ from light_utils import (
 async def main() -> None:
     async with httpx.AsyncClient(base_url=BASE_URL) as client:
         await reset_all_lights(client)
+        operation_error = None
         try:
             print("Initial light status:")
             pprint(await get_all_lights(client))
@@ -33,9 +35,20 @@ async def main() -> None:
 
             print("\nFinal light status:")
             pprint(await get_all_lights(client))
+        except BaseException as error:
+            operation_error = error
+            raise
+        except BaseException as error:
+            operation_error = error
+            raise
         finally:
-            await reset_all_lights(client)
-            print("\nAll lights reset to OFF.")
+            # เพิ่มเงื่อนไข: จะ cleanup ก็ต่อเมื่อเกิด error เท่านั้น
+            if operation_error is not None:
+                lights = await cleanup_lights(
+                    client, original_error=operation_error
+                )
+                if lights is not None:
+                    print("\nError occurred: All lights reset and verified OFF.")
 
 
 if __name__ == "__main__":
