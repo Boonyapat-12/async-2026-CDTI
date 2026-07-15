@@ -2,7 +2,7 @@
 import httpx
 
 async def send_order_to_kitchen(student_id: str, shop_name: str, menu_name: str) -> dict:
-    url = f"http://127.0.0.1:8088/order/{shop_name}"
+    url = f"http://172.16.2.117:8088/order/{shop_name}"
     payload = {"student_id": student_id, "menu_name": menu_name}
     try:
         async with httpx.AsyncClient() as client:
