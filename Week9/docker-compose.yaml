@@ -1,0 +1,58 @@
+services:
+  redis:
+    image: redis:alpine
+    container_name: f1-redis
+    restart: always
+    ports:
+      # แมปพอร์ต Host (เครื่องครู: 6379) เข้ากับ Port ภายใน Container (Redis: 6379)
+      - "6379:6379"
+    
+    # คำสั่งตั้งค่าการทำงานของ Redis Server สำหรับ Streaming Load
+    command: >
+      redis-server 
+      --save "" 
+      --appendonly no 
+      --maxmemory 512mb 
+      --maxmemory-policy noeviction 
+      --client-output-buffer-limit normal 0 0 0 
+      --tcp-backlog 512 
+      --loglevel notice
+
+# =========================================================================
+#  คำอธิบายการตั้งค่า Redis Flags (สำหรับสตรีมมิ่ง 30 FPS + 40 คน):
+# =========================================================================
+# 1. --save "" และ --appendonly no
+#    -> ปิดการบันทึกข้อมูลลง Disk (RDB/AOF) เพราะสตรีมภาพเป็น Real-time Data
+#    -> ช่วยลดภาระ Disk I/O และลดการใช้ CPU ของเครื่องครูอย่างมหาศาล
+#
+# 2. --maxmemory 512mb
+#    -> สำรอง RAM ให้ Redis ไว้พักข้อมูลเฟรมภาพ และรองรับ Buffer ขาออก
+#
+# 3. --maxmemory-policy noeviction
+#    -> ป้องกัน Redis แอบลบ Stream Key ('teachers_stream') ทิ้งเมื่อ RAM เต็ม
+#    -> คุมขนาดข้อมูลโดยใช้ maxlen=30 ในโค้ด Python ฝั่ง Producer แทน
+#
+# 4. --client-output-buffer-limit normal 0 0 0
+#    -> [สำคัญมาก] ปิดขีดจำกัด Buffer ขาออกของ Client
+#    -> ป้องกัน Redis สั่งตัดสาย (Disconnect) นักเรียนที่เครื่องประมวลผลภาพช้า
+#
+# 5. --tcp-backlog 512
+#    -> เพิ่มความสามารถในการรองรับการเชื่อมต่อพร้อมกัน (Concurrent Connections)
+#
+# 6. --loglevel notice
+#    -> ลดการเก็บบันทึก Log ไม่จำเป็น (ไม่ใช้ debug) เพื่อประหยัด CPU
+# =========================================================================
+
+# image: redis:alpine 
+#     ใช้ Linux Alpine เป็น Base Image ทำให้ขนาด Image รวมทั้งหมด ไม่ถึง 30 MB (เทียบกับภาพปกติที่ขนาดเกือบ 150 MB)
+# --save "" และ --appendonly no
+#     ปิดการเซฟข้อมูลลง Disk ทุกชนิด ให้ทำงานบน RAM อย่างเดียว 100% เหมาะอย่างยิ่งกับวิดีโอสตรีมเพราะลดการเขียน Disk และเพิ่มความเร็ว Latency ถึงขีดสุด
+# --maxmemory 128mb
+#     ล็อคไม่ให้ Redis กิน RAM ของเครื่องเกิน 128 MB (ปรับลด/เพิ่มได้ตามความเหมาะสมของขนาดภาพ)
+# --maxmemory-policy allkeys-lru
+#     หาก RAM 128MB เต็ม Redis จะลบเฟรมภาพที่เก่าที่สุดทิ้งให้อัตโนมัติ (Drop Frame) เพื่อให้เฟรมใหม่ล่าสุดเข้ามาได้เสมอ ไม่ทำให้ระบบค้าง
+# --loglevel notice (ระดับ Log ของ Redis):
+#   debug : บันทึกละเอียดมาก (เหมาะกับตอนแก้บั๊ก แต่ Log จะเยอะมาก)
+#   verbose : บันทึกข้อมูลทั่วไป
+#   notice : (แนะนำ) บันทึกเฉพาะข้อมูลสำคัญที่ควรทราบในการใช้งานจริง
+#   warning : บันทึกเฉพาะแจ้งเตือนหรือ Error
