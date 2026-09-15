@@ -7,7 +7,7 @@ from pynput import keyboard
 class KeyboardTankController:
     def __init__(self, team_name):
         self.team = team_name
-        self.r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+        self.r = redis.Redis(host='172.20.56.216', port=6379, db=0, decode_responses=True)
         self.pubsub_channel = "game:state"
         self.command_channel = "game:commands"
         

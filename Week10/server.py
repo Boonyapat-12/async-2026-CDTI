@@ -5,7 +5,7 @@ import sys
 import time
 import redis.asyncio as redis
 
-GRID_SIZE = 10           # กำหนดขนาดของตารางเกม (10x10)
+GRID_SIZE = 50           # กำหนดขนาดของตารางเกม (50x50)
 TICK_RATE = 0.2          # 1 Tick = 0.2 วินาที (5 FPS)
 FIRE_COOLDOWN = 0.5      # คุมที่ Server: ยิงได้ทุกๆ 0.5 วินาทีเท่านั้น
 MAX_ACTIVE_BULLETS = 2   # คุมที่ Server: กระสุนในสนามของแต่ละทีมห้ามเกิน 2 นัด
