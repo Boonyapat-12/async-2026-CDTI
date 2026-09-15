@@ -1,14 +1,14 @@
-services:
-  redis:
-    image: redis:alpine
-    container_name: tank_game_redis
-    restart: always
-    ports:
+services:  # กำหนดรายการ service ที่ Docker Compose ต้องเปิดใช้งาน
+  redis:  # กำหนด service Redis สำหรับรับส่งข้อมูลแบบ asynchronous
+    image: redis:alpine  # เลือก Redis image ขนาดเล็กจาก Docker Hub
+    container_name: tank_game_redis  # ตั้งชื่อ container ของ Redis สำหรับเกม tank
+    restart: always  # ให้ Docker เริ่ม container ใหม่อัตโนมัติเมื่อหยุดทำงาน
+    ports:  # เปิดพอร์ต Redis ให้โปรแกรมภายนอกเชื่อมต่อได้
       # แมปพอร์ต Host (เครื่องครู: 6379) เข้ากับ Port ภายใน Container (Redis: 6379)
-      - "6379:6379"
+      - "6379:6379"  # แมปพอร์ต 6379 ของ Host กับพอร์ต 6379 ภายใน container
     
     # คำสั่งตั้งค่าการทำงานของ Redis Server สำหรับ Streaming Load
-    command: >
+    command: >  # กำหนดคำสั่งเริ่มต้นและ flags ของ Redis server
       redis-server 
       --save "" 
       --appendonly no 

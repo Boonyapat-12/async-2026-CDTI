@@ -1,76 +1,76 @@
-import asyncio
-import httpx
+import asyncio  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+import httpx  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
 
-SERVER_IP = "172.20.58.26"
-PORT = "8088"
-SERVER_URL = f"http://{SERVER_IP}:{PORT}"
+SERVER_IP = "172.20.58.26"  # กำหนดหรือปรับค่าให้ SERVER_IP
+PORT = "8088"  # กำหนดหรือปรับค่าให้ PORT
+SERVER_URL = f"http://{SERVER_IP}:{PORT}"  # กำหนดหรือปรับค่าให้ SERVER_URL
 
 # ระบุรหัส/ชื่อนักเรียนของผู้เล่น
-MY_STUDENT_ID = "6710301033"
+MY_STUDENT_ID = "6710301033"  # กำหนดหรือปรับค่าให้ MY_STUDENT_ID
 
-async def hunt_coupons():
-    async with httpx.AsyncClient() as client:
-        print(f"[{MY_STUDENT_ID}] เริ่มต้นภารกิจล่าคูปอง...")
+async def hunt_coupons():  # ประกาศฟังก์ชัน hunt_coupons สำหรับรวมขั้นตอนการทำงาน
+    async with httpx.AsyncClient() as client:  # เปิดใช้งาน resource ภายใน context manager
+        print(f"[{MY_STUDENT_ID}] เริ่มต้นภารกิจล่าคูปอง...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
         # ยิงขอคูปองต่อเนื่องสูงสุด 5 ครั้ง เพื่อพยายามเก็บให้ได้ครบ 2 ใบ
-        for attempt in range(1, 6):
-            try:
-                res = await client.post(
-                    f"{SERVER_URL}/claim",
-                    json={"student_id": MY_STUDENT_ID},
-                    timeout=5.0
-                )
-                data = res.json()
-                status = data.get("status")
+        for attempt in range(1, 6):  # วนซ้ำเพื่อประมวลผลข้อมูลทีละรายการ
+            try:  # เริ่มบล็อกสำหรับดักจับข้อผิดพลาด
+                res = await client.post(  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
+                    f"{SERVER_URL}/claim",  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                    json={"student_id": MY_STUDENT_ID},  # กำหนดหรือปรับค่าให้ json
+                    timeout=5.0  # กำหนดหรือปรับค่าให้ timeout
+                )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
+                data = res.json()  # กำหนดหรือปรับค่าให้ data
+                status = data.get("status")  # เรียกใช้บริการหรือส่งคำขอไปยังระบบภายนอก
 
-                print(f"  -- ครั้งที่ {attempt}: [{status}] -> {data.get('message', data.get('claimed_coupon'))}")
+                print(f"  -- ครั้งที่ {attempt}: [{status}] -> {data.get('message', data.get('claimed_coupon'))}")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
                 # หากได้ครบ 2 ใบ หรือคูปองหมดแล้ว ให้หยุดยิงทันที
-                if status in ["LIMIT_REACHED", "OUT_OF_STOCK"]:
-                    break
+                if status in ["LIMIT_REACHED", "OUT_OF_STOCK"]:  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
+                    break  # หยุดการวนซ้ำทันที
 
-            except Exception as e:
-                print(f"เกิดข้อผิดพลาดในการเชื่อมต่อ: {e}")
+            except Exception as e:  # จัดการข้อผิดพลาดชนิดที่ระบุ
+                print(f"เกิดข้อผิดพลาดในการเชื่อมต่อ: {e}")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
             # พักก่อนยิงรอบถัดไปเล็กน้อย
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.01)  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
         # ------------------------------------------------------------
         # 1. ดึงสรุปคูปองส่วนตัว (เฉพาะของ MY_STUDENT_ID)
         # ------------------------------------------------------------
-        print("\nกำลังดึงสรุปคูปองของตนเอง...")
-        try:
-            res = await client.get(f"{SERVER_URL}/my-coupons/{MY_STUDENT_ID}")
-            if res.status_code == 200:
-                summary = res.json()
-                total = summary.get("total_claimed", 0)
-                coupons = summary.get("claimed_coupons", [])
-                print(f"สรุปของ [{MY_STUDENT_ID}]: ได้รับคูปองรวม {total} ใบ -> {coupons}")
-            else:
-                print(f"ดึงข้อมูลส่วนตัวไม่สำเร็จ Status Code: {res.status_code}")
-        except Exception as e:
-            print(f"เกิดข้อผิดพลาดในการดึงข้อมูลส่วนตัว: {e}")
+        print("\nกำลังดึงสรุปคูปองของตนเอง...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+        try:  # เริ่มบล็อกสำหรับดักจับข้อผิดพลาด
+            res = await client.get(f"{SERVER_URL}/my-coupons/{MY_STUDENT_ID}")  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
+            if res.status_code == 200:  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
+                summary = res.json()  # กำหนดหรือปรับค่าให้ summary
+                total = summary.get("total_claimed", 0)  # เรียกใช้บริการหรือส่งคำขอไปยังระบบภายนอก
+                coupons = summary.get("claimed_coupons", [])  # เรียกใช้บริการหรือส่งคำขอไปยังระบบภายนอก
+                print(f"สรุปของ [{MY_STUDENT_ID}]: ได้รับคูปองรวม {total} ใบ -> {coupons}")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+            else:  # ทำงานในกรณีที่เงื่อนไขก่อนหน้าไม่เป็นจริง
+                print(f"ดึงข้อมูลส่วนตัวไม่สำเร็จ Status Code: {res.status_code}")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+        except Exception as e:  # จัดการข้อผิดพลาดชนิดที่ระบุ
+            print(f"เกิดข้อผิดพลาดในการดึงข้อมูลส่วนตัว: {e}")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
         # ------------------------------------------------------------
         # 2. เพิ่มการดึงสรุปภาพรวมทั้งหมด (/summary)
         # ------------------------------------------------------------
-        print("\n กำลังดึงสรุปภาพรวมคูปองทั้งหมดจาก Server (/summary)...")
-        try:
-            res = await client.get(f"{SERVER_URL}/summary")
-            if res.status_code == 200:
-                summary_all = res.json()
-                rem_stock = summary_all.get("remaining_stock", "N/A")
-                claims = summary_all.get("student_claims", {})
+        print("\n กำลังดึงสรุปภาพรวมคูปองทั้งหมดจาก Server (/summary)...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+        try:  # เริ่มบล็อกสำหรับดักจับข้อผิดพลาด
+            res = await client.get(f"{SERVER_URL}/summary")  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
+            if res.status_code == 200:  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
+                summary_all = res.json()  # กำหนดหรือปรับค่าให้ summary_all
+                rem_stock = summary_all.get("remaining_stock", "N/A")  # เรียกใช้บริการหรือส่งคำขอไปยังระบบภายนอก
+                claims = summary_all.get("student_claims", {})  # เรียกใช้บริการหรือส่งคำขอไปยังระบบภายนอก
 
-                print(f"จำนวนคูปองคงเหลือใน Server: {rem_stock} ใบ")
-                print("รายการคูปองที่นักเรียนแต่ละคนได้รับ:")
+                print(f"จำนวนคูปองคงเหลือใน Server: {rem_stock} ใบ")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+                print("รายการคูปองที่นักเรียนแต่ละคนได้รับ:")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
-                for sid, coupons in claims.items():
-                    print(f" -  {sid}: ได้รับ {len(coupons)} ใบ -> {coupons}")
-            else:
-                print(f"ดึงข้อมูลสรุปภาพรวมไม่สำเร็จ Status Code: {res.status_code}")
-        except Exception as e:
-            print(f"เกิดข้อผิดพลาดในการดึงสรุปภาพรวม: {e}")
+                for sid, coupons in claims.items():  # วนซ้ำเพื่อประมวลผลข้อมูลทีละรายการ
+                    print(f" -  {sid}: ได้รับ {len(coupons)} ใบ -> {coupons}")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+            else:  # ทำงานในกรณีที่เงื่อนไขก่อนหน้าไม่เป็นจริง
+                print(f"ดึงข้อมูลสรุปภาพรวมไม่สำเร็จ Status Code: {res.status_code}")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+        except Exception as e:  # จัดการข้อผิดพลาดชนิดที่ระบุ
+            print(f"เกิดข้อผิดพลาดในการดึงสรุปภาพรวม: {e}")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
-if __name__ == "__main__":
-    asyncio.run(hunt_coupons())
+if __name__ == "__main__":  # ตรวจสอบว่าไฟล์นี้ถูกเรียกใช้งานโดยตรงหรือถูก import
+    asyncio.run(hunt_coupons())  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน

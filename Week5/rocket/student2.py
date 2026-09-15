@@ -1,15 +1,16 @@
-import webbrowser
-import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+import webbrowser  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+import uvicorn  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+from fastapi import FastAPI  # นำเข้าส่วนประกอบที่ต้องใช้จากโมดูลที่ระบุ
+from fastapi.responses import HTMLResponse  # นำเข้าส่วนประกอบที่ต้องใช้จากโมดูลที่ระบุ
 
 # 1. รับค่ารหัสนักศึกษา และ IP ของ Server จาก Terminal
-student_id = input("กรุณากรอกรหัสนักศึกษา (หรือชื่อจรวด): ").strip() or "Rocket_101"
-server_ip = input("กรุณากรอก IP ของ Server (กด Enter หากเป็น localhost): ").strip() or "localhost"
+student_id = input("กรุณากรอกรหัสนักศึกษา (หรือชื่อจรวด): ").strip() or "Rocket_101"  # กำหนดหรือปรับค่าให้ student_id
+server_ip = input("กรุณากรอก IP ของ Server (กด Enter หากเป็น localhost): ").strip() or "localhost"  # กำหนดหรือปรับค่าให้ server_ip
 
-app = FastAPI(title=f"Rocket Controller - {student_id}")
+app = FastAPI(title=f"Rocket Controller - {student_id}")  # กำหนดหรือปรับค่าให้ app
 
 # 2. หน้าจอควบคุมจรวด (HTML + CSS + JavaScript)
+# คอมเมนต์บรรทัดที่เริ่มข้อความหลายบรรทัด โดยไม่เปลี่ยนเนื้อหาภายใน string
 html_code = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -79,14 +80,14 @@ html_code = f"""
 </script>
 </body>
 </html>
-"""
+"""  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
 
-@app.get("/")
-async def get_index():
-    return HTMLResponse(html_code)
+@app.get("/")  # ใช้ decorator เพื่อกำหนดพฤติกรรมเพิ่มเติมให้กับฟังก์ชันหรือคลาส
+async def get_index():  # ประกาศฟังก์ชัน get_index สำหรับรวมขั้นตอนการทำงาน
+    return HTMLResponse(html_code)  # ส่งผลลัพธ์กลับไปยังผู้เรียก
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # ตรวจสอบว่าไฟล์นี้ถูกเรียกใช้งานโดยตรงหรือถูก import
     # เปิดเบราว์เซอร์ไปที่ Port 8001 อัตโนมัติ
-    webbrowser.open("http://127.0.0.1:8003")
+    webbrowser.open("http://127.0.0.1:8003")  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
     # รัน FastAPI Server บนเครื่องนักเรียน Port 8003
-    uvicorn.run(app, host="127.0.0.1", port=8003)
+    uvicorn.run(app, host="127.0.0.1", port=8003)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน

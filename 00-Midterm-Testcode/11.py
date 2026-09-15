@@ -1,12 +1,12 @@
-import asyncio
+import asyncio  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
 
-async def bad_coro():
-    print("Starting...")
+async def bad_coro():  # ประกาศฟังก์ชัน bad_coro สำหรับรวมขั้นตอนการทำงาน
+    print("Starting...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
-    asyncio.sleep(1)
-    print("Finished...")
+    asyncio.sleep(1)  # รอหรือจำลองระยะเวลาการทำงานตามค่าที่กำหนด
+    print("Finished...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
-async def main():
-    await bad_coro()
+async def main():  # ประกาศฟังก์ชัน main สำหรับรวมขั้นตอนการทำงาน
+    await bad_coro()  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
-asyncio.run(main())
+asyncio.run(main())  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน

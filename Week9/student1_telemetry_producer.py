@@ -1,78 +1,81 @@
-import asyncio
-import random
-import time
-import json
-import redis.asyncio as redis
+import asyncio  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+import random  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+import time  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+import json  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+import redis.asyncio as redis  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
 
 # ⚙️ CONFIGURATION
 REDIS_HOST = '172.16.46.79'     # IP ของ Redis Server (เครื่องครู)
 GROUP_ID = 'g04'                # เลขกลุ่ม เช่น g01 - g08
 STUDENT_ID = '6710301033'       # รหัสนักศึกษาตนเอง
 
-STREAM_KEY = f"f1:telemetry:{GROUP_ID}"
+STREAM_KEY = f"f1:telemetry:{GROUP_ID}"  # กำหนดหรือปรับค่าให้ STREAM_KEY
 FINISH_DISTANCE = 10000.0       # 10,000 เมตร (10 km)
 
 
-async def wait_for_new_green_light(r: redis.Redis):
+async def wait_for_new_green_light(r: redis.Redis):  # ประกาศฟังก์ชัน wait_for_new_green_light สำหรับรวมขั้นตอนการทำงาน
     """ฟังก์ชันการันตีว่าจะต้องรอครูกดสัญญาณปล่อยตัวรอบใหม่เสมอ"""
 
-    print(f"🏎️ [{GROUP_ID}] Checking Race Status...")
+    print(f"🏎️ [{GROUP_ID}] Checking Race Status...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
     # 1. หากสถานะปัจจุบันเป็น GREEN ค้างอยู่
     # (แข่งจบไปแล้วรอบนึง)
     # ให้รอกระทั่งครู Reset เป็น STOPPED/RED
-    current_status = await r.get("f1:race:status")
+    current_status = await r.get("f1:race:status")  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
-    if current_status == "GREEN":
-        print(
+    if current_status == "GREEN":  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
+        print(  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+            # คอมเมนต์บรรทัดที่เริ่มข้อความหลายบรรทัด โดยไม่เปลี่ยนเนื้อหาภายใน string
             f"⏳ [{GROUP_ID}] "
-            f"Waiting for Teacher to RESET the race status (STOPPED)..."
-        )
+            f"Waiting for Teacher to RESET the race status (STOPPED)..."  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+        )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
 
-        while True:
-            status = await r.get("f1:race:status")
+        while True:  # วนซ้ำตราบใดที่เงื่อนไขยังเป็นจริง
+            status = await r.get("f1:race:status")  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
-            if status != "GREEN":
-                break
+            if status != "GREEN":  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
+                break  # หยุดการวนซ้ำทันที
 
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
     # 2. เมื่อสถานะไม่ใช่ GREEN แล้ว
     # ให้รอกระทั่งครูกดปล่อยตัว (GREEN) รอบใหม่
-    print(
+    print(  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+        # คอมเมนต์บรรทัดที่เริ่มข้อความหลายบรรทัด โดยไม่เปลี่ยนเนื้อหาภายใน string
         f"🚦 [{GROUP_ID}] "
-        f"Ready on Grid! Waiting for Teacher's GREEN LIGHT..."
-    )
+        f"Ready on Grid! Waiting for Teacher's GREEN LIGHT..."  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+    )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
 
-    while True:
-        status = await r.get("f1:race:status")
+    while True:  # วนซ้ำตราบใดที่เงื่อนไขยังเป็นจริง
+        status = await r.get("f1:race:status")  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
-        if status == "GREEN":
-            print(
+        if status == "GREEN":  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
+            print(  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+                # คอมเมนต์บรรทัดที่เริ่มข้อความหลายบรรทัด โดยไม่เปลี่ยนเนื้อหาภายใน string
                 f"🚦 [{GROUP_ID}] "
-                f"LIGHTS OUT AND AWAY WE GO!"
-            )
-            break
+                f"LIGHTS OUT AND AWAY WE GO!"  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+            )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
+            break  # หยุดการวนซ้ำทันที
 
         # เดิม 0.2 วินาที
         # ลดเหลือ 0.05 เพื่อให้ตรวจพบ GREEN เร็วขึ้น
         # แต่ยังไม่ยิง Redis ถี่เกินไป
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.05)  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
 
-async def produce_f1_telemetry():
+async def produce_f1_telemetry():  # ประกาศฟังก์ชัน produce_f1_telemetry สำหรับรวมขั้นตอนการทำงาน
 
-    r = redis.Redis(
-        host=REDIS_HOST,
-        port=6379,
-        db=0,
-        decode_responses=True
-    )
+    r = redis.Redis(  # เรียกใช้บริการหรือส่งคำขอไปยังระบบภายนอก
+        host=REDIS_HOST,  # กำหนดหรือปรับค่าให้ host
+        port=6379,  # กำหนดหรือปรับค่าให้ port
+        db=0,  # กำหนดหรือปรับค่าให้ db
+        decode_responses=True  # กำหนดหรือปรับค่าให้ decode_responses
+    )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
 
     # 🚦 เรียกใช้ฟังก์ชันรอสัญญาณปล่อยตัวรอบใหม่เสมอ
-    await wait_for_new_green_light(r)
+    await wait_for_new_green_light(r)  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
-    total_distance_m = 0.0
+    total_distance_m = 0.0  # กำหนดหรือปรับค่าให้ total_distance_m
 
     dt = 0.05  # ส่งข้อมูลทุก 0.05 วินาที (20 Hz)
 
@@ -82,55 +85,55 @@ async def produce_f1_telemetry():
 
     # ใช้ monotonic clock สำหรับจับเวลา loop
     # เพราะเหมาะสำหรับวัดช่วงเวลามากกว่า time.time()
-    next_tick = time.monotonic()
+    next_tick = time.monotonic()  # กำหนดหรือปรับค่าให้ next_tick
 
     # ใช้นับจำนวน packet
     # เพื่อไม่ต้อง print ทุก packet
-    packet_count = 0
+    packet_count = 0  # กำหนดหรือปรับค่าให้ packet_count
 
-    try:
-        while True:
+    try:  # เริ่มบล็อกสำหรับดักจับข้อผิดพลาด
+        while True:  # วนซ้ำตราบใดที่เงื่อนไขยังเป็นจริง
 
             # speed_kmh = round(random.uniform(180.0, 330.0), 1)
 
-            speed_kmh = round(
-                random.triangular(180.0, 330.0, 300.0),
-                1
-            )
+            speed_kmh = round(  # กำหนดหรือปรับค่าให้ speed_kmh
+                random.triangular(180.0, 330.0, 300.0),  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                1  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+            )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
 
             # คำนวณระยะทางที่เพิ่มขึ้นใน 0.05 วินาที
-            distance_delta = (
-                speed_kmh * 1000.0 / 3600.0
-            ) * dt
+            distance_delta = (  # กำหนดหรือปรับค่าให้ distance_delta
+                speed_kmh * 1000.0 / 3600.0  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+            ) * dt  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
 
-            total_distance_m += distance_delta
+            total_distance_m += distance_delta  # กำหนดหรือปรับค่าให้ total_distance_m
 
-            payload = {
-                "timestamp": time.time(),
-                "speed": speed_kmh,
-                "engine_temp": round(
-                    random.uniform(90.0, 125.0),
-                    1
-                ),
-                "tire_wear": round(
-                    random.uniform(5.0, 95.0),
-                    1
-                ),
-                "rpm": random.randint(10000, 15000),
-                "gear": random.randint(3, 8),
-                "distance": round(total_distance_m, 2)
-            }
+            payload = {  # กำหนดหรือปรับค่าให้ payload
+                "timestamp": time.time(),  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                "speed": speed_kmh,  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                "engine_temp": round(  # เริ่มบล็อกหรือโครงสร้างข้อมูลสำหรับขั้นตอนถัดไป
+                    random.uniform(90.0, 125.0),  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                    1  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                ),  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
+                "tire_wear": round(  # เริ่มบล็อกหรือโครงสร้างข้อมูลสำหรับขั้นตอนถัดไป
+                    random.uniform(5.0, 95.0),  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                    1  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                ),  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
+                "rpm": random.randint(10000, 15000),  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                "gear": random.randint(3, 8),  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                "distance": round(total_distance_m, 2)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+            }  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
 
             # ส่งข้อมูลเข้า Redis Stream
-            msg_id = await r.xadd(
-                STREAM_KEY,
-                payload,
-                maxlen=1000,
-                approximate=True
-            )
+            msg_id = await r.xadd(  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
+                STREAM_KEY,  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                payload,  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                maxlen=1000,  # กำหนดหรือปรับค่าให้ maxlen
+                approximate=True  # กำหนดหรือปรับค่าให้ approximate
+            )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
 
             # นับ packet ที่ส่งสำเร็จ
-            packet_count += 1
+            packet_count += 1  # กำหนดหรือปรับค่าให้ packet_count
 
             # เดิม print ทุก packet = ประมาณ 20 ครั้ง/วินาที
             #
@@ -139,44 +142,46 @@ async def produce_f1_telemetry():
             #
             # ข้อมูลยังเหมือนเดิม เพียงไม่ให้ Terminal
             # สร้าง overhead ทุก ๆ 0.05 วินาที
-            if packet_count % 20 == 0:
-                print(
+            if packet_count % 20 == 0:  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
+                print(  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+                    # คอมเมนต์บรรทัดที่เริ่มข้อความหลายบรรทัด โดยไม่เปลี่ยนเนื้อหาภายใน string
                     f"🏎️ [{GROUP_ID}] "
                     f"Sent ID: {msg_id} | "
                     f"Speed: {speed_kmh} km/h | "
-                    f"Dist: {total_distance_m:.1f} m"
-                )
+                    f"Dist: {total_distance_m:.1f} m"  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
 
             # เช็กการเข้าเส้นชัย
-            if total_distance_m >= FINISH_DISTANCE:
+            if total_distance_m >= FINISH_DISTANCE:  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
 
-                print(
+                print(  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+                    # คอมเมนต์บรรทัดที่เริ่มข้อความหลายบรรทัด โดยไม่เปลี่ยนเนื้อหาภายใน string
                     f"🏁 🏆 [{GROUP_ID}] "
                     f"CHEQUERED FLAG! "
                     f"Finished race distance "
-                    f"{total_distance_m:.1f} m"
-                )
+                    f"{total_distance_m:.1f} m"  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
 
-                await r.publish(
-                    "f1:race:finish",
-                    json.dumps(
-                        {
-                            "group_id": GROUP_ID
-                        }
-                    )
-                )
+                await r.publish(  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
+                    "f1:race:finish",  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                    json.dumps(  # เริ่มบล็อกหรือโครงสร้างข้อมูลสำหรับขั้นตอนถัดไป
+                        {  # เริ่มบล็อกหรือโครงสร้างข้อมูลสำหรับขั้นตอนถัดไป
+                            "group_id": GROUP_ID  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+                        }  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
+                    )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
+                )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
 
-                break
+                break  # หยุดการวนซ้ำทันที
 
             # ============================================
             # จัดเวลาให้แต่ละรอบพยายามอยู่ที่ 0.05 วินาที
             # ============================================
 
             # เวลาที่รอบถัดไป "ควร" เริ่ม
-            next_tick += dt
+            next_tick += dt  # กำหนดหรือปรับค่าให้ next_tick
 
             # ดูว่าเหลือเวลาอีกเท่าไร
-            sleep_time = next_tick - time.monotonic()
+            sleep_time = next_tick - time.monotonic()  # กำหนดหรือปรับค่าให้ sleep_time
 
             # ถ้ายังเหลือเวลา จึงค่อย sleep
             #
@@ -190,17 +195,17 @@ async def produce_f1_telemetry():
             # = 0.042 sec
             #
             # รวมแล้วประมาณ 0.05 sec
-            if sleep_time > 0:
-                await asyncio.sleep(sleep_time)
+            if sleep_time > 0:  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
+                await asyncio.sleep(sleep_time)  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
             # ถ้า loop ช้ากว่ากำหนดไปแล้ว
             # จะไม่ sleep เพิ่มอีก
-            else:
-                next_tick = time.monotonic()
+            else:  # ทำงานในกรณีที่เงื่อนไขก่อนหน้าไม่เป็นจริง
+                next_tick = time.monotonic()  # กำหนดหรือปรับค่าให้ next_tick
 
-    except asyncio.CancelledError:
-        await r.close()
+    except asyncio.CancelledError:  # จัดการข้อผิดพลาดชนิดที่ระบุ
+        await r.close()  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
 
-if __name__ == "__main__":
-    asyncio.run(produce_f1_telemetry())
+if __name__ == "__main__":  # ตรวจสอบว่าไฟล์นี้ถูกเรียกใช้งานโดยตรงหรือถูก import
+    asyncio.run(produce_f1_telemetry())  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน

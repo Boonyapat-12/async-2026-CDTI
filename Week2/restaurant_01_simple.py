@@ -1,55 +1,55 @@
-from time import sleep, ctime, time
+from time import sleep, ctime, time  # นำเข้าส่วนประกอบที่ต้องใช้จากโมดูลที่ระบุ
 
 
 # restaurant_01_simple.py
-def greet_diners(customer):
-    print(f"{ctime()} Greeting for Customer-{customer} ...")
-    sleep(1)
-    print(f"{ctime()} Greeting for Customer-{customer} ...Done!")
+def greet_diners(customer):  # ประกาศฟังก์ชัน greet_diners สำหรับรวมขั้นตอนการทำงาน
+    print(f"{ctime()} Greeting for Customer-{customer} ...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+    sleep(1)  # รอหรือจำลองระยะเวลาการทำงานตามค่าที่กำหนด
+    print(f"{ctime()} Greeting for Customer-{customer} ...Done!")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
 
-def take_order(customer):
-    print(f"{ctime()} [Customer-{customer}] Taking Order ...")
-    sleep(1)
-    print(f"{ctime()} [Customer-{customer}] Taking Order ...Done!")
+def take_order(customer):  # ประกาศฟังก์ชัน take_order สำหรับรวมขั้นตอนการทำงาน
+    print(f"{ctime()} [Customer-{customer}] Taking Order ...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+    sleep(1)  # รอหรือจำลองระยะเวลาการทำงานตามค่าที่กำหนด
+    print(f"{ctime()} [Customer-{customer}] Taking Order ...Done!")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
 
-def do_cooking(customer):
-    print(f"{ctime()} [Customer-{customer}] Cooking Spaghetti ...")
-    sleep(1)
-    print(f"{ctime()} [Customer-{customer}] Cooking Spaghetti ...Done!")
+def do_cooking(customer):  # ประกาศฟังก์ชัน do_cooking สำหรับรวมขั้นตอนการทำงาน
+    print(f"{ctime()} [Customer-{customer}] Cooking Spaghetti ...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+    sleep(1)  # รอหรือจำลองระยะเวลาการทำงานตามค่าที่กำหนด
+    print(f"{ctime()} [Customer-{customer}] Cooking Spaghetti ...Done!")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
 
-def mini_bar(customer):
-    print(f"{ctime()} [Customer-{customer}] Manage Bar for Drink ...")
-    sleep(1)
-    print(f"{ctime()} [Customer-{customer}] Manage Bar for Drink ...Done!")
+def mini_bar(customer):  # ประกาศฟังก์ชัน mini_bar สำหรับรวมขั้นตอนการทำงาน
+    print(f"{ctime()} [Customer-{customer}] Manage Bar for Drink ...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+    sleep(1)  # รอหรือจำลองระยะเวลาการทำงานตามค่าที่กำหนด
+    print(f"{ctime()} [Customer-{customer}] Manage Bar for Drink ...Done!")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
 
-def serve_customer(customer):
-    take_order(customer)
-    do_cooking(customer)
-    mini_bar(customer)
-    print(f"{ctime()} [Customer-{customer}] All served!")
-    print()
+def serve_customer(customer):  # ประกาศฟังก์ชัน serve_customer สำหรับรวมขั้นตอนการทำงาน
+    take_order(customer)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+    do_cooking(customer)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+    mini_bar(customer)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+    print(f"{ctime()} [Customer-{customer}] All served!")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+    print()  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
 
-def main():
-    customers = ["A", "B", "C"]
-    start_time = time()
+def main():  # ประกาศฟังก์ชัน main สำหรับรวมขั้นตอนการทำงาน
+    customers = ["A", "B", "C"]  # กำหนดหรือปรับค่าให้ customers
+    start_time = time()  # กำหนดหรือปรับค่าให้ start_time
 
-    for customer in customers:
-        greet_diners(customer)
+    for customer in customers:  # วนซ้ำเพื่อประมวลผลข้อมูลทีละรายการ
+        greet_diners(customer)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
 
-    print()
-    print(f"{ctime()} --- All customers greeted. Serving customers one by one! ---")
-    print()
+    print()  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+    print(f"{ctime()} --- All customers greeted. Serving customers one by one! ---")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+    print()  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
-    for customer in customers:
-        serve_customer(customer)
+    for customer in customers:  # วนซ้ำเพื่อประมวลผลข้อมูลทีละรายการ
+        serve_customer(customer)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
 
-    print(f"{ctime()} Finished Entire Restaurant Operation in {time() - start_time:.2f} seconds.")
+    print(f"{ctime()} Finished Entire Restaurant Operation in {time() - start_time:.2f} seconds.")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # ตรวจสอบว่าไฟล์นี้ถูกเรียกใช้งานโดยตรงหรือถูก import
+    main()  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน

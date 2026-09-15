@@ -1,35 +1,35 @@
-import asyncio
-import time
+import asyncio  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+import time  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
 
 # --- แบบ 1: Synchronous (Blocking) ---
-def sync_task(name, delay):
-    print(f"[Sync] เริ่มงาน {name} (ต้องใช้เวลา {delay} วินาที)...")
+def sync_task(name, delay):  # ประกาศฟังก์ชัน sync_task สำหรับรวมขั้นตอนการทำงาน
+    print(f"[Sync] เริ่มงาน {name} (ต้องใช้เวลา {delay} วินาที)...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
     time.sleep(delay)  # CPU หยุดนิ่งเพื่อนั่งรอตรงนี้
-    print(f"[Sync] งาน {name} เสร็จสิ้น!")
+    print(f"[Sync] งาน {name} เสร็จสิ้น!")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
-def main_sync():
-    start_time = time.time()
-    print("=== เริ่มทำงานแบบ Synchronous ===")
-    sync_task("A", 2)
-    sync_task("B", 3)
-    print(f"เวลารวมแบบ Sync: {time.time() - start_time:.2f} วินาที\n")
+def main_sync():  # ประกาศฟังก์ชัน main_sync สำหรับรวมขั้นตอนการทำงาน
+    start_time = time.time()  # กำหนดหรือปรับค่าให้ start_time
+    print("=== เริ่มทำงานแบบ Synchronous ===")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+    sync_task("A", 2)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+    sync_task("B", 3)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+    print(f"เวลารวมแบบ Sync: {time.time() - start_time:.2f} วินาที\n")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
 # --- แบบ 2: Asynchronous (Non-blocking) ---
-async def async_task(name, delay):
-    print(f"[Async] เริ่มงาน {name} (ต้องใช้เวลา {delay} วินาที)...")
+async def async_task(name, delay):  # ประกาศฟังก์ชัน async_task สำหรับรวมขั้นตอนการทำงาน
+    print(f"[Async] เริ่มงาน {name} (ต้องใช้เวลา {delay} วินาที)...")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
     await asyncio.sleep(delay)  # สลับให้ Event Loop ไปรันงานอื่นระหว่างรอ
-    print(f"[Async] งาน {name} เสร็จสิ้น!")
+    print(f"[Async] งาน {name} เสร็จสิ้น!")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
-async def main_async():
-    start_time = time.time()
-    print("=== เริ่มทำงานแบบ Asynchronous ===")
+async def main_async():  # ประกาศฟังก์ชัน main_async สำหรับรวมขั้นตอนการทำงาน
+    start_time = time.time()  # กำหนดหรือปรับค่าให้ start_time
+    print("=== เริ่มทำงานแบบ Asynchronous ===")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
     # รันงาน A และ B พร้อมกันบน Event Loop
-    await asyncio.gather(
-        async_task("A", 2),
-        async_task("B", 3)
-    )
-    print(f"เวลารวมแบบ Async: {time.time() - start_time:.2f} วินาที")
+    await asyncio.gather(  # รันงาน asynchronous หลายงานพร้อมกันและรวมผลลัพธ์
+        async_task("A", 2),  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+        async_task("B", 3)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+    )  # ปิดบล็อกหรือโครงสร้างข้อมูลที่เริ่มไว้
+    print(f"เวลารวมแบบ Async: {time.time() - start_time:.2f} วินาที")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
 
-if __name__ == "__main__":
-    main_sync()
-    asyncio.run(main_async())
+if __name__ == "__main__":  # ตรวจสอบว่าไฟล์นี้ถูกเรียกใช้งานโดยตรงหรือถูก import
+    main_sync()  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+    asyncio.run(main_async())  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน

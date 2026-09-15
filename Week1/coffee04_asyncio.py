@@ -1,14 +1,14 @@
-from time import ctime, time
-import asyncio
+from time import ctime, time  # นำเข้าส่วนประกอบที่ต้องใช้จากโมดูลที่ระบุ
+import asyncio  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
 
 # ฟังก์ชันจำลองการทำกาแฟแบบ Asynchronous
-async def make_coffee(customer_name):
-    pass
+async def make_coffee(customer_name):  # ประกาศฟังก์ชัน make_coffee สำหรับรวมขั้นตอนการทำงาน
+    pass  # เว้นพื้นที่ไว้โดยยังไม่เพิ่มการทำงานในบล็อกนี้
 
-async def main():
-    pass
+async def main():  # ประกาศฟังก์ชัน main สำหรับรวมขั้นตอนการทำงาน
+    pass  # เว้นพื้นที่ไว้โดยยังไม่เพิ่มการทำงานในบล็อกนี้
 
 # สั่งให้ระบบ Async เริ่มทำงาน
-if __name__ == "__main__":
+if __name__ == "__main__":  # ตรวจสอบว่าไฟล์นี้ถูกเรียกใช้งานโดยตรงหรือถูก import
     # ใช้ asyncio.run เพื่อเปิด Event Loop หลักของโปรแกรม
-    asyncio.run(main())
+    asyncio.run(main())  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน

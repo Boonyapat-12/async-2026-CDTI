@@ -1,15 +1,16 @@
-import webbrowser
-import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+import webbrowser  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+import uvicorn  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+from fastapi import FastAPI  # นำเข้าส่วนประกอบที่ต้องใช้จากโมดูลที่ระบุ
+from fastapi.responses import HTMLResponse  # นำเข้าส่วนประกอบที่ต้องใช้จากโมดูลที่ระบุ
 
 # 1. รับค่ารหัสนักศึกษา และ IP ของ Server
-student_id = input("กรุณากรอกรหัสนักศึกษา (Student ID): ").strip()
-server_ip = input("กรุณากรอก IP ของ Server (กด Enter หากเป็น localhost): ").strip() or "localhost"
+student_id = input("กรุณากรอกรหัสนักศึกษา (Student ID): ").strip()  # กำหนดหรือปรับค่าให้ student_id
+server_ip = input("กรุณากรอก IP ของ Server (กด Enter หากเป็น localhost): ").strip() or "localhost"  # กำหนดหรือปรับค่าให้ server_ip
 
-app = FastAPI(title=f"Client Screen - {student_id}")
+app = FastAPI(title=f"Client Screen - {student_id}")  # กำหนดหรือปรับค่าให้ app
 
 # 2. โค้ด HTML แสดงผลหน้าจอ
+# คอมเมนต์บรรทัดที่เริ่มข้อความหลายบรรทัด โดยไม่เปลี่ยนเนื้อหาภายใน string
 html_code = f"""
 <!DOCTYPE html>
 <html>
@@ -59,16 +60,16 @@ html_code = f"""
         </script>
     </body>
 </html>
-"""
+"""  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
 
-@app.get("/")
-async def get_index():
-    return HTMLResponse(html_code)
+@app.get("/")  # ใช้ decorator เพื่อกำหนดพฤติกรรมเพิ่มเติมให้กับฟังก์ชันหรือคลาส
+async def get_index():  # ประกาศฟังก์ชัน get_index สำหรับรวมขั้นตอนการทำงาน
+    return HTMLResponse(html_code)  # ส่งผลลัพธ์กลับไปยังผู้เรียก
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # ตรวจสอบว่าไฟล์นี้ถูกเรียกใช้งานโดยตรงหรือถูก import
     # client port
-    client_port = 8002
+    client_port = 8002  # กำหนดหรือปรับค่าให้ client_port
     # เปิด เบราว์เซอร์ อัตโนมัติไปยังหน้าจอ Client บนเครื่องนั้นๆ
-    webbrowser.open(f"http://127.0.0.1:{client_port}")
+    webbrowser.open(f"http://127.0.0.1:{client_port}")  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
     # รัน Local Web Server บน Port 8002
-    uvicorn.run(app, host="127.0.0.1", port=client_port)
+    uvicorn.run(app, host="127.0.0.1", port=client_port)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน

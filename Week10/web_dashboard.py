@@ -1,49 +1,50 @@
-import asyncio
-import json
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-import redis.asyncio as redis
-import uvicorn
+import asyncio  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+import json  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+from contextlib import asynccontextmanager  # นำเข้าส่วนประกอบที่ต้องใช้จากโมดูลที่ระบุ
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # นำเข้าส่วนประกอบที่ต้องใช้จากโมดูลที่ระบุ
+from fastapi.responses import HTMLResponse  # นำเข้าส่วนประกอบที่ต้องใช้จากโมดูลที่ระบุ
+import redis.asyncio as redis  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
+import uvicorn  # นำเข้าโมดูลที่จำเป็นสำหรับโปรแกรม
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
+class ConnectionManager:  # ประกาศคลาส ConnectionManager สำหรับรวมข้อมูลและพฤติกรรมที่เกี่ยวข้อง
+    def __init__(self):  # ประกาศฟังก์ชัน __init__ สำหรับรวมขั้นตอนการทำงาน
+        self.active_connections: list[WebSocket] = []  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
+    async def connect(self, websocket: WebSocket):  # ประกาศฟังก์ชัน connect สำหรับรวมขั้นตอนการทำงาน
+        await websocket.accept()  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
+        self.active_connections.append(websocket)  # เพิ่มหรือปรับปรุงข้อมูลในโครงสร้างข้อมูล
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+    def disconnect(self, websocket: WebSocket):  # ประกาศฟังก์ชัน disconnect สำหรับรวมขั้นตอนการทำงาน
+        if websocket in self.active_connections:  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
+            self.active_connections.remove(websocket)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
 
-    async def broadcast(self, message: str):
-        for connection in list(self.active_connections):
-            try:
-                await connection.send_text(message)
-            except Exception:
-                self.disconnect(connection)
+    async def broadcast(self, message: str):  # ประกาศฟังก์ชัน broadcast สำหรับรวมขั้นตอนการทำงาน
+        for connection in list(self.active_connections):  # วนซ้ำเพื่อประมวลผลข้อมูลทีละรายการ
+            try:  # เริ่มบล็อกสำหรับดักจับข้อผิดพลาด
+                await connection.send_text(message)  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
+            except Exception:  # จัดการข้อผิดพลาดชนิดที่ระบุ
+                self.disconnect(connection)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
 
-manager = ConnectionManager()
+manager = ConnectionManager()  # กำหนดหรือปรับค่าให้ manager
 
-async def redis_listener():
-    r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
-    pubsub = r.pubsub()
-    await pubsub.subscribe("game:state")
+async def redis_listener():  # ประกาศฟังก์ชัน redis_listener สำหรับรวมขั้นตอนการทำงาน
+    r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)  # เรียกใช้บริการหรือส่งคำขอไปยังระบบภายนอก
+    pubsub = r.pubsub()  # กำหนดหรือปรับค่าให้ pubsub
+    await pubsub.subscribe("game:state")  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
     
-    async for message in pubsub.listen():
-        if message["type"] == "message":
-            await manager.broadcast(message["data"])
+    async for message in pubsub.listen():  # วนซ้ำเพื่อประมวลผลข้อมูลทีละรายการ
+        if message["type"] == "message":  # ตรวจสอบเงื่อนไขก่อนเลือกเส้นทางการทำงาน
+            await manager.broadcast(message["data"])  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    listener_task = asyncio.create_task(redis_listener())
-    yield
-    listener_task.cancel()
+@asynccontextmanager  # ใช้ decorator เพื่อกำหนดพฤติกรรมเพิ่มเติมให้กับฟังก์ชันหรือคลาส
+async def lifespan(app: FastAPI):  # ประกาศฟังก์ชัน lifespan สำหรับรวมขั้นตอนการทำงาน
+    listener_task = asyncio.create_task(redis_listener())  # สร้าง task เพื่อให้ coroutine ทำงานแบบ concurrent
+    yield  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
+    listener_task.cancel()  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan)  # กำหนดหรือปรับค่าให้ app
 
+# คอมเมนต์บรรทัดที่เริ่มข้อความหลายบรรทัด โดยไม่เปลี่ยนเนื้อหาภายใน string
 HTML_CONTENT = """
 <!DOCTYPE html>
 <html lang="th">
@@ -450,19 +451,19 @@ HTML_CONTENT = """
 </html>
 """
 
-@app.get("/")
-async def get():
-    return HTMLResponse(HTML_CONTENT)
+@app.get("/")  # ใช้ decorator เพื่อกำหนดพฤติกรรมเพิ่มเติมให้กับฟังก์ชันหรือคลาส
+async def get():  # ประกาศฟังก์ชัน get สำหรับรวมขั้นตอนการทำงาน
+    return HTMLResponse(HTML_CONTENT)  # ส่งผลลัพธ์กลับไปยังผู้เรียก
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+@app.websocket("/ws")  # ใช้ decorator เพื่อกำหนดพฤติกรรมเพิ่มเติมให้กับฟังก์ชันหรือคลาส
+async def websocket_endpoint(websocket: WebSocket):  # ประกาศฟังก์ชัน websocket_endpoint สำหรับรวมขั้นตอนการทำงาน
+    await manager.connect(websocket)  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
+    try:  # เริ่มบล็อกสำหรับดักจับข้อผิดพลาด
+        while True:  # วนซ้ำตราบใดที่เงื่อนไขยังเป็นจริง
+            await websocket.receive_text()  # รอผลลัพธ์ของงาน asynchronous โดยไม่บล็อก event loop
+    except WebSocketDisconnect:  # จัดการข้อผิดพลาดชนิดที่ระบุ
+        manager.disconnect(websocket)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
 
-if __name__ == "__main__":
-    print("🌐 Web Dashboard running at: http://localhost:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+if __name__ == "__main__":  # ตรวจสอบว่าไฟล์นี้ถูกเรียกใช้งานโดยตรงหรือถูก import
+    print("🌐 Web Dashboard running at: http://localhost:8000")  # แสดงข้อมูลหรือผลลัพธ์ออกทางหน้าจอ
+    uvicorn.run(app, host="0.0.0.0", port=8000)  # ดำเนินคำสั่งของบรรทัดนี้ตามลำดับการทำงาน
