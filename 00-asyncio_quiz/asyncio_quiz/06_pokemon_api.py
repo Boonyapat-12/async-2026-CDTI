@@ -50,8 +50,8 @@ async def get_pokemons_info():  # ประกาศ coroutine หลักส�
         fetch_pokemon("pikachu"),  # ดึงข้อมูลของ pikachu
         fetch_pokemon("charizard"),  # ดึงข้อมูลของ charizard
     )  # ปิดรายการ coroutine ที่ส่งให้ asyncio.gather
-    print (list(pokemon_name)) # แสดง list ข้อมูลโปเกมอนทั้งสามตัว
-    return list(pokemon_name)  # คืน list ข้อมูลโปเกมอนให้ผู้เรียกใช้ฟังก์ชัน
+    print (type(pokemon_name)) # แสดง list ข้อมูลโปเกมอนทั้งสามตัว
+    return pokemon_name # คืน list ข้อมูลโปเกมอนให้ผู้เรียกใช้ฟังก์ชัน
 
 
 asyncio.run(get_pokemons_info())  # สร้าง event loop และเริ่มรัน coroutine หลัก
