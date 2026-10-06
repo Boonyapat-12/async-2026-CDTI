@@ -41,7 +41,6 @@ OPEN BOOK — ดัชนีค้นคำตอบเร็ว
 [QUEUE-03] Bounded queue
 [QUEUE-04] หยุด worker ด้วย sentinel
 [QUEUE-05] แก้คิวค้าง
-[0] [1] [2] [3] [4] [5]
 
 09_redis.txt
 [REDIS-01] พื้นฐาน
@@ -64,3 +63,57 @@ OPEN BOOK — ดัชนีค้นคำตอบเร็ว
 [RECIPE-04] โจทย์เวลา
 [RECIPE-05] โจทย์เลือกตอบสองข้อ
 [RECIPE-06] คำสั่งอ่านและค้นจาก root ของ repo
+
+14_multiple_choice_quick_reference.txt
+[MC-ASYNC] synchronous / concurrent / parallel / CPU / I/O
+[MC-CORO] coroutine / await / event loop
+[MC-TASK] done / result / exception / cancel
+[MC-GATHER] gather / ลำดับ / exception
+[MC-WAIT] wait / FIRST_COMPLETED / timeout
+[MC-LOCK] shared state / race condition / critical section
+[MC-QUEUE] FIFO / maxsize / task_done / join
+[MC-HTTP] HTTPX / FastAPI / WebSocket
+[MC-REDIS] Redis / PubSub / Streams / XACK
+[MC-TANK] Tank Battle ตามโค้ด repo
+[MC-TIME] สูตรประมาณเวลาและอ่านลำดับ
+
+15_bug_finder.txt
+[BUG-AWAIT] coroutine was never awaited / งานไม่ทำ
+[BUG-BLOCK] งานอื่นไม่เดิน / timer ช้า
+[BUG-RESULT] InvalidStateError / Result is not set
+[BUG-WAIT] Passing coroutines is forbidden / TypeError
+[BUG-PENDING] Task was destroyed / งานเบื้องหลังไม่จบ
+[BUG-LOCK-SCOPE] count/stock/coupon ผิดแม้มี lock
+[BUG-LOCK-INSTANCE] ใส่ Lock แล้วยังแจกซ้ำ
+[BUG-JOIN] queue.join() ค้าง
+[BUG-SENTINEL] worker บางตัวรอ get ไม่ยอมจบ
+[BUG-QUEUE-API] QueueFull / QueueEmpty
+[BUG-CANCEL] CancelledError หลุด despite except Exception
+[BUG-DEADLOCK] lock ค้าง / task ขอ lock เดิมซ้ำ
+[BUG-HTTP] TypeError จาก await response.json()
+[BUG-ORDER] ผล gather ดูไม่ตรงลำดับเสร็จ
+[BUG-ACK] Stream pending เพิ่ม / worker ล่มแล้วงานไม่กลับ
+[BUG-PUBSUB] offline กลับมาแล้ว message หาย
+[BUG-TRACE] ไล่บัคบนกระดาษก่อนแก้
+
+16_code_templates.txt
+[TPL-GATHER] รันหลายงานและรวมผลตาม input
+[TPL-WAIT] รอชุดงานแรกที่จบและหยุดที่เหลือ
+[TPL-TIMEOUT] รอหนึ่งงานพร้อม timeout
+[TPL-ERRORS] เก็บผลสำเร็จและ exception ของทุกงาน
+[TPL-CANCEL] ยกเลิก background task พร้อม cleanup
+[TPL-LOCK] อัปเดต shared state อย่างถูกต้อง
+[TPL-QUEUE] Producer–Consumer หลาย worker พร้อม shutdown
+[TPL-THREAD] ย้าย blocking I/O ออกจาก loop
+[TPL-HTTP] เรียก HTTP หลายรายการและตรวจ error
+[TPL-PUBSUB] รับ Pub/Sub ก่อนส่งข้อความ demo
+[TPL-STREAM] เพิ่ม Stream event แล้วรับและ ACK ใน group
+[TPL-API] FastAPI และ WebSocket echo
+[TPL-CHECK] ตรวจคำตอบก่อนส่ง
+
+17_exam_navigation.txt
+[NAV-START] เริ่มตรงนี้
+[NAV-CHOICE] คำในตัวเลือก -> ค้นในไฟล์ 14
+[NAV-BUG] อาการ -> ค้นในไฟล์ 15
+[NAV-CODE] Requirement -> ค้นในไฟล์ 16
+[NAV-SEARCH] ค้นโดยไม่อ่านทั้งเล่ม

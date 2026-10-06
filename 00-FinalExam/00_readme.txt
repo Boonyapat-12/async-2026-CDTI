@@ -4,6 +4,8 @@ OPEN BOOK — Asynchronous Programming
 เอกสารฝึก ไม่ใช่ข้อสอบจริง และไม่มีข้อมูลยืนยันขอบเขตข้อสอบของอาจารย์
 
 เริ่มอ่าน: 02 -> 03 -> 04 -> 05 -> 06 -> 07 -> 08 -> 09 -> 10 -> 11
+เปิดในห้องสอบ: 17_exam_navigation.txt
+กา: 14 / หาบัค: 15 / เขียนโค้ด: 16
 ค้นเร็ว: 01_quick_index.txt
 รวมเล่ม: 12_openbook_all.txt
 ข้อสอบฝึก 30 ข้อพร้อมเฉลย: 13_practice_exam_with_answers.txt

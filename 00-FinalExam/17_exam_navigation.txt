@@ -1,0 +1,62 @@
+เปิดค้างในห้องสอบ — ทางลัดทั้ง 3 พาร์ท
+========================================================================
+
+[NAV-START] เริ่มตรงนี้
+พาร์ท 1 กา -> เปิด 14_multiple_choice_quick_reference.txt
+พาร์ท 2 หาบัค -> เปิด 15_bug_finder.txt
+พาร์ท 3 เขียน -> เปิด 16_code_templates.txt
+ต้องอ่านเหตุผลละเอียด -> 01_quick_index.txt แล้วไปบท 02–10
+ฝึกก่อนสอบ -> 13_practice_exam_with_answers.txt
+
+[NAV-CHOICE] คำในตัวเลือก -> ค้นในไฟล์ 14
+concurrent/parallel/I/O/CPU -> [MC-ASYNC]
+coroutine/await/event loop -> [MC-CORO]
+result/done/cancel -> [MC-TASK]
+ลำดับผล gather/error -> [MC-GATHER]
+FIRST_COMPLETED/pending/timeout -> [MC-WAIT]
+shared state/lock/process -> [MC-LOCK]
+FIFO/queue/join/maxsize -> [MC-QUEUE]
+HTTP/FastAPI/WebSocket -> [MC-HTTP]
+Redis/Stream/ACK/group -> [MC-REDIS]
+game:commands/game:state/tick -> [MC-TANK]
+เวลารวม/ลำดับ await -> [MC-TIME]
+
+[NAV-BUG] อาการ -> ค้นในไฟล์ 15
+ไม่ทำงาน/never awaited -> [BUG-AWAIT]
+งานอื่นไม่เดิน -> [BUG-BLOCK]
+InvalidStateError -> [BUG-RESULT]
+wait TypeError -> [BUG-WAIT]
+task ค้างหลัง cancel -> [BUG-PENDING]
+count/coupon ผิด -> [BUG-LOCK-SCOPE], [BUG-LOCK-INSTANCE]
+join ค้าง -> [BUG-JOIN]; get ไม่จบ -> [BUG-SENTINEL]
+QueueFull/QueueEmpty -> [BUG-QUEUE-API]
+CancelledError -> [BUG-CANCEL]; lock ค้าง -> [BUG-DEADLOCK]
+await json TypeError -> [BUG-HTTP]
+gather order -> [BUG-ORDER]
+pending Redis -> [BUG-ACK]; offline หาย -> [BUG-PUBSUB]
+
+[NAV-CODE] Requirement -> ค้นในไฟล์ 16
+ต้องได้ทุกผล -> [TPL-GATHER]
+เอางานแรกที่จบ -> [TPL-WAIT]
+กำหนดเวลารอ -> [TPL-TIMEOUT]
+บางงาน fail แต่ต้องได้ผลอื่น -> [TPL-ERRORS]
+หยุด background worker -> [TPL-CANCEL]
+แก้ข้อมูลร่วม -> [TPL-LOCK]
+ผลิต/รับงาน/หลาย worker -> [TPL-QUEUE]
+blocking library -> [TPL-THREAD]
+HTTP หลาย URL -> [TPL-HTTP]
+live broadcast -> [TPL-PUBSUB]
+เก็บ event/ACK -> [TPL-STREAM]
+API/WebSocket -> [TPL-API]
+ก่อนส่ง -> [TPL-CHECK]
+
+[NAV-SEARCH] ค้นโดยไม่อ่านทั้งเล่ม
+คำสั่ง PowerShell จาก root ของ repo:
+Select-String -Path .\00-FinalExam\15_bug_finder.txt -SimpleMatch '[BUG-JOIN]' -Context 0,18
+Select-String -Path .\00-FinalExam\16_code_templates.txt -SimpleMatch '[TPL-LOCK]' -Context 0,26
+Get-Content -Raw -Encoding utf8 .\00-FinalExam\17_exam_navigation.txt
+Linux/macOS: less 00-FinalExam/16_code_templates.txt
+ใน less ค้น literal โดยพิมพ์ / ตามด้วย \[TPL-LOCK\] แล้ว Enter
+กด n ไปผลถัดไป, q ออก; Ctrl+F ใน editor ค้นรหัสได้โดยตรง
+
+ใช้ข้อมูล/ชื่อ function/output ตามโจทย์จริง; template เป็นจุดเริ่มปรับคำตอบ

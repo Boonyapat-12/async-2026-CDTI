@@ -1,0 +1,186 @@
+พาร์ท 2 — หาบัค: อาการ → สาเหตุ → โค้ดแก้
+========================================================================
+
+ค้นจากอาการหรือรหัส BUG; ตัวอย่างในบัตรเป็น snippet ไม่ใช่โปรแกรมเต็ม
+ลำดับตรวจ: entry point -> schedule -> blocking -> shared state -> cleanup
+
+[BUG-AWAIT] coroutine was never awaited / งานไม่ทำ
+สาเหตุ: เรียก coroutine แต่ไม่ await หรือ schedule
+โค้ดเสี่ยง:
+fetch()
+แก้เป็น:
+result = await fetch()
+ข้อควรตรวจ: คำสั่งแก้ต้องอยู่ใน async def; หรือใช้ asyncio.run(main()) ในสคริปต์
+------------------------------------------------------------------------
+
+[BUG-BLOCK] งานอื่นไม่เดิน / timer ช้า
+สาเหตุ: blocking call บน loop thread
+โค้ดเสี่ยง:
+time.sleep(1)
+แก้เป็น:
+await asyncio.sleep(1)
+ข้อควรตรวจ: blocking I/O library ใช้ await asyncio.to_thread(fn, args); ไม่ได้หยุด thread ด้วย cancel ทันที
+------------------------------------------------------------------------
+
+[BUG-RESULT] InvalidStateError / Result is not set
+สาเหตุ: อ่าน result ก่อน task จบ
+โค้ดเสี่ยง:
+value = task.result()
+แก้เป็น:
+value = await task
+ข้อควรตรวจ: await ส่ง exception ของ task กลับมาด้วย ต้องจับตามโจทย์
+------------------------------------------------------------------------
+
+[BUG-WAIT] Passing coroutines is forbidden / TypeError
+สาเหตุ: ส่ง coroutine ให้ wait ใน Python 3.12
+โค้ดเสี่ยง:
+done, pending = await asyncio.wait([job()])
+แก้เป็น:
+task = asyncio.create_task(job())
+done, pending = await asyncio.wait([task])
+ข้อควรตรวจ: ไม่สร้าง coroutine แล้วทิ้งค้าง; wait ไม่ cancel pending เอง
+------------------------------------------------------------------------
+
+[BUG-PENDING] Task was destroyed / งานเบื้องหลังไม่จบ
+สาเหตุ: cancel แล้วไม่รอ cleanup
+โค้ดเสี่ยง:
+for task in pending:
+    task.cancel()
+แก้เป็น:
+for task in pending:
+    task.cancel()
+await asyncio.gather(*pending, return_exceptions=True)
+ข้อควรตรวจ: ถ้าไม่ต้องการ cancel ให้ await งานต่อแทน; อย่ายกเลิกงานที่โจทย์ต้องการผล
+------------------------------------------------------------------------
+
+[BUG-LOCK-SCOPE] count/stock/coupon ผิดแม้มี lock
+สาเหตุ: อ่านค่าเก่าหรือเช็คสิทธิ์นอก critical section
+โค้ดเสี่ยง:
+old = count
+async with lock:
+    count = old + 1
+แก้เป็น:
+async with lock:
+    old = count
+    count = old + 1
+ข้อควรตรวจ: ล็อกทั้ง check + update และใช้ lock ร่วมกันทุกเส้นทาง
+------------------------------------------------------------------------
+
+[BUG-LOCK-INSTANCE] ใส่ Lock แล้วยังแจกซ้ำ
+สาเหตุ: แต่ละ worker สร้าง lock คนละตัว
+โค้ดเสี่ยง:
+async def worker():
+    lock = asyncio.Lock()
+แก้เป็น:
+lock = asyncio.Lock()  # สร้างร่วมภายใน main
+# ส่ง lock เดียวเข้า worker ทุกตัว
+ข้อควรตรวจ: snippet แสดงตำแหน่งสร้าง ไม่ใช่โปรแกรมเต็ม; หลาย process ยังต้องใช้กลไกอื่น
+------------------------------------------------------------------------
+
+[BUG-JOIN] queue.join() ค้าง
+สาเหตุ: มี unfinished item ไม่ได้รับ task_done หรือ worker ตาย
+โค้ดเสี่ยง:
+item = await q.get()
+await process(item)
+แก้เป็น:
+item = await q.get()
+try:
+    await process(item)
+finally:
+    q.task_done()
+ข้อควรตรวจ: finally ยืนยันการจัดการ ไม่ใช่ความสำเร็จ; ถ้า worker fail ต้องกำหนดหยุด/ระบาย/ retry งานที่เหลือ
+------------------------------------------------------------------------
+
+[BUG-SENTINEL] worker บางตัวรอ get ไม่ยอมจบ
+สาเหตุ: sentinel ไม่ครบ worker หรือไม่มี shutdown path
+โค้ดเสี่ยง:
+await q.put(None)  # แต่มี 3 worker
+แก้เป็น:
+for _ in workers:
+    await q.put(None)
+await q.join()
+await asyncio.gather(*workers)
+ข้อควรตรวจ: consumer ต้องหยุดเมื่อเจอ None และ task_done ทั้งงานและ sentinel; payload ห้ามเป็น None
+------------------------------------------------------------------------
+
+[BUG-QUEUE-API] QueueFull / QueueEmpty
+สาเหตุ: ใช้ nowait แล้วไม่ได้รับมือสถานะทันที
+โค้ดเสี่ยง:
+item = q.get_nowait()
+แก้เป็น:
+item = await q.get()
+ข้อควรตรวจ: ใช้ await ถ้าต้องการรอ; ถ้าต้องไม่รอ ให้จับ asyncio.QueueEmpty/QueueFull
+------------------------------------------------------------------------
+
+[BUG-CANCEL] CancelledError หลุด despite except Exception
+สาเหตุ: จับผิดระดับ exception
+โค้ดเสี่ยง:
+except Exception:
+    print("cancelled")
+แก้เป็น:
+except asyncio.CancelledError:
+    # cleanup ที่จำเป็น
+    raise
+ข้อควรตรวจ: ใช้ finally สำหรับ resource; การ raise ต่อรักษา cancellation semantics
+------------------------------------------------------------------------
+
+[BUG-DEADLOCK] lock ค้าง / task ขอ lock เดิมซ้ำ
+สาเหตุ: ถือ lock แล้ว await งานที่ต้องขอ lock เดียว
+โค้ดเสี่ยง:
+async with lock:
+    await update_with_same_lock()
+แก้เป็น:
+async with lock:
+    update_without_reacquiring_lock()
+ข้อควรตรวจ: asyncio.Lock ไม่ reentrant; แยก helper ที่รับผิดชอบ locking ให้ชัด
+------------------------------------------------------------------------
+
+[BUG-HTTP] TypeError จาก await response.json()
+สาเหตุ: await สิ่งที่ไม่ใช่ awaitable
+โค้ดเสี่ยง:
+data = await response.json()
+แก้เป็น:
+data = response.json()
+ข้อควรตรวจ: response = await client.get(url); response.raise_for_status() ก่อนอ่าน body
+------------------------------------------------------------------------
+
+[BUG-ORDER] ผล gather ดูไม่ตรงลำดับเสร็จ
+สาเหตุ: เข้าใจ gather คืนลำดับเสร็จ
+โค้ดเสี่ยง:
+results = await asyncio.gather(a(), b())
+แก้เป็น:
+a_result, b_result = await asyncio.gather(a(), b())
+ข้อควรตรวจ: นี่ไม่ใช่บัคใน gather; ถ้าต้องการลำดับเสร็จใช้ as_completed ตาม requirement
+------------------------------------------------------------------------
+
+[BUG-ACK] Stream pending เพิ่ม / worker ล่มแล้วงานไม่กลับ
+สาเหตุ: ไม่ ack หรือไม่มี reclaim
+โค้ดเสี่ยง:
+entries = await r.xreadgroup(group, consumer, {stream: ">"})
+แก้เป็น:
+await process(fields)
+await r.xack(stream, group, message_id)
+ข้อควรตรวจ: ack หลังจัดการสำเร็จ ไม่ใช่ก่อน; ตัวอย่างเป็นส่วนใน loop; recovery ต้องออกแบบแยก
+------------------------------------------------------------------------
+
+[BUG-PUBSUB] offline กลับมาแล้ว message หาย
+สาเหตุ: ใช้ Pub/Sub แต่ต้องการ history
+โค้ดเสี่ยง:
+await r.publish(channel, payload)
+แก้เป็น:
+ใช้ Stream + XADD + อ่านต่อจาก ID หรือ consumer group ตาม requirement
+ข้อควรตรวจ: ไม่ใช่เปลี่ยนบรรทัดเดียว ต้องแก้ producer/consumer และ retention
+------------------------------------------------------------------------
+
+[BUG-TRACE] ไล่บัคบนกระดาษก่อนแก้
+1. จดว่า coroutine ใดถูก schedule จริง ไม่ใช่ดูแต่ชื่อ async def
+2. ติดตาม shared state และจุดที่ค่าอาจเก่าหลัง await
+3. จดผลสำเร็จ/exception/cancellation แยกกัน
+4. งานที่ไม่จบยังมีใครถือ reference หรือรออยู่ไหม?
+5. resource/connection/task_done/lock ถูกคืนในทุกเส้นทางไหม?
+6. ดู requirement ก่อนแก้: ต้องการทุกผลหรือผู้ชนะ ต้อง retry หรือยกเลิก?
+
+ตัวอย่าง timeline: count=0, A/B อ่านแล้ว await ก่อนเขียน
+A อ่าน 0 -> พัก; B อ่าน 0 -> พัก; A เขียน 1; B เขียน 1
+ผลผิด 1 เพราะ stale read; lock ครอบทั้งชุดได้ 2
+โค้ดเต็มที่ทดลองได้: [TPL-LOCK] ใน 16_code_templates.txt

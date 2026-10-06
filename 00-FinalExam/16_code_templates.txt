@@ -1,0 +1,296 @@
+พาร์ท 3 — เขียนโค้ด: แม่แบบครบพร้อมปรับ
+========================================================================
+
+ใช้ Python 3.12; ทุก CODE ด้านล่างเป็นโปรแกรมครบในตัวเมื่อมี dependency
+คัดลอกหนึ่ง CODE เป็น answer.py แล้ว python answer.py
+FastAPI template ใช้ชื่อไฟล์และคำสั่ง uvicorn ที่กำกับ
+อย่าคัดลอกทุก template มารวมกันโดยไม่แก้ entry point
+แก้ input/ชื่อฟังก์ชัน/ชนิดข้อมูลให้ตรงโจทย์ เก็บ comment ไทยเฉพาะที่ช่วยอธิบาย
+
+[TPL-GATHER] รันหลายงานและรวมผลตาม input
+ใช้เมื่อ: ต้องได้ทุกผล
+เปลี่ยนตรงนี้: jobs, delay และรูปแบบ return
+[CODE TPL-GATHER]
+import asyncio  # รันงานที่รอได้
+async def job(value):
+    await asyncio.sleep(0.01)  # แทนการรอ I/O
+    return value * 2  # เปลี่ยนสูตรตามโจทย์
+async def main():
+    jobs = [1, 2, 3]  # input ของโจทย์
+    results = await asyncio.gather(*(job(x) for x in jobs))
+    print(results)  # เรียงตาม input
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: [2, 4, 6]
+
+[TPL-WAIT] รอชุดงานแรกที่จบและหยุดที่เหลือ
+ใช้เมื่อ: โจทย์ให้เลือกผู้เสร็จก่อน
+เปลี่ยนตรงนี้: tasks และวิธีเลือกจาก done ถ้ามีหลายตัว
+[CODE TPL-WAIT]
+import asyncio  # สร้าง task ที่แข่งกัน
+async def job(name, delay):
+    await asyncio.sleep(delay)
+    return name
+async def main():
+    tasks = {asyncio.create_task(job("A", 0.01)),
+             asyncio.create_task(job("B", 0.5))}
+    try:
+        done, pending = await asyncio.wait(tasks,
+            return_when=asyncio.FIRST_COMPLETED)
+        print(sorted(t.result() for t in done))  # ตรวจทุก task ที่จบ
+    finally:
+        for task in tasks:  # รวม cleanup แม้ result() เกิด exception
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: ['A']
+
+[TPL-TIMEOUT] รอหนึ่งงานพร้อม timeout
+ใช้เมื่อ: โจทย์กำหนดเวลารอสูงสุด
+เปลี่ยนตรงนี้: timeout และชนิด exception ที่ตอบ
+[CODE TPL-TIMEOUT]
+import asyncio  # ใช้ wait_for
+async def job():
+    await asyncio.sleep(0.5)  # จำลองงานช้า
+    return "ok"
+async def main():
+    try:
+        value = await asyncio.wait_for(job(), timeout=0.01)
+        print(value)
+    except TimeoutError:
+        print("timeout")  # ผู้รอตัดสินใจเมื่อเกินเวลา
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: timeout
+
+[TPL-ERRORS] เก็บผลสำเร็จและ exception ของทุกงาน
+ใช้เมื่อ: บางงาน fail แต่ยังต้องตรวจผลอื่น
+เปลี่ยนตรงนี้: ชนิด exception และ output format
+[CODE TPL-ERRORS]
+import asyncio  # รวมผลพร้อม exception
+async def job(value):
+    await asyncio.sleep(0)
+    if value == 0:
+        raise ValueError("zero")
+    return 10 // value
+async def main():
+    results = await asyncio.gather(job(2), job(0), return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):  # รวมกรณี cancellation ด้วย
+            print(type(result).__name__)
+        else:
+            print(result)
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: 5
+ValueError
+
+[TPL-CANCEL] ยกเลิก background task พร้อม cleanup
+ใช้เมื่อ: ต้องหยุด worker ที่รอไม่สิ้นสุด
+เปลี่ยนตรงนี้: worker และ resource ใน finally
+[CODE TPL-CANCEL]
+import asyncio  # ขอและรอ cancellation
+async def worker(started):
+    started.set()  # ยืนยันว่าเข้า worker แล้ว
+    try:
+        await asyncio.sleep(60)
+    finally:
+        print("cleanup")  # คืน resource ตามโจทย์
+async def main():
+    started = asyncio.Event()
+    task = asyncio.create_task(worker(started))
+    await started.wait()  # ไม่ cancel ก่อน worker เริ่ม
+    task.cancel()
+    try:
+        await task  # รอ cleanup
+    except asyncio.CancelledError:
+        print("cancelled")
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: cleanup
+cancelled
+
+[TPL-LOCK] อัปเดต shared state อย่างถูกต้อง
+ใช้เมื่อ: หลาย task แก้ค่าร่วมใน loop เดียว
+เปลี่ยนตรงนี้: จำนวน workers, state และ critical section
+[CODE TPL-LOCK]
+import asyncio  # lock ร่วมกัน
+async def main():
+    state = {"count": 0}
+    lock = asyncio.Lock()  # สร้างหนึ่งตัวร่วม
+    async def worker():
+        async with lock:  # ครอบทั้ง read-modify-write
+            old = state["count"]
+            await asyncio.sleep(0)  # แสดงจุดที่งานอื่นอาจแทรก
+            state["count"] = old + 1
+    await asyncio.gather(*(worker() for _ in range(3)))
+    print(state["count"])
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: 3
+
+[TPL-QUEUE] Producer–Consumer หลาย worker พร้อม shutdown
+ใช้เมื่อ: งานในคิวและต้องรอทุกชิ้น
+เปลี่ยนตรงนี้: จำนวน worker, maxsize, input และ process
+[CODE TPL-QUEUE]
+import asyncio  # queue ใน loop เดียว
+async def main():
+    queue = asyncio.Queue(maxsize=2)
+    results, errors = [], []  # ระบุเส้นทาง fail โดยไม่ปล่อย worker ตาย
+    async def worker():
+        while True:
+            item = await queue.get()
+            try:
+                if item is None:  # input ปกติห้ามเป็น None
+                    return
+                try:
+                    await asyncio.sleep(0)
+                    results.append(item * 2)
+                except Exception as error:
+                    errors.append((item, type(error).__name__))
+            finally:
+                queue.task_done()  # รวม sentinel และงานล้มเหลวที่จัดการแล้ว
+    workers = [asyncio.create_task(worker()) for _ in range(2)]
+    for item in [1, 2, 3]:
+        await queue.put(item)
+    for _ in workers:
+        await queue.put(None)
+    await queue.join()
+    await asyncio.gather(*workers)
+    print(sorted(results), errors)
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: [2, 4, 6] []
+ข้อจำกัด TPL-QUEUE: บันทึก error ไม่ retry; ถ้า main ถูก cancel ต้องออกแบบ shutdown เพิ่ม
+
+[TPL-THREAD] ย้าย blocking I/O ออกจาก loop
+ใช้เมื่อ: มีไลบรารี synchronous สำหรับ I/O
+เปลี่ยนตรงนี้: blocking function และ args
+[CODE TPL-THREAD]
+import asyncio  # offload ไป thread
+import time  # จำลอง blocking I/O
+def read_sync():
+    time.sleep(0.01)  # บล็อก worker thread ไม่ใช่ loop thread
+    return "data"
+async def main():
+    print(await asyncio.to_thread(read_sync))
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: data
+ข้อจำกัด TPL-THREAD: เหมาะ blocking I/O; cancellation ไม่หยุด thread ที่รันอยู่ทันที
+
+[TPL-HTTP] เรียก HTTP หลายรายการและตรวจ error
+ใช้เมื่อ: โจทย์มี API หลาย URL
+เปลี่ยนตรงนี้: urls, timeout, field ที่อ่าน
+[CODE TPL-HTTP]
+import asyncio  # รัน request ร่วมกัน
+import httpx  # ต้องมี HTTPX และบริการปลายทาง
+async def fetch(client, url):
+    response = await client.get(url)
+    response.raise_for_status()
+    return response.json()
+async def main():
+    urls = ["http://127.0.0.1:8000/items/1", "http://127.0.0.1:8000/items/2"]
+    async with httpx.AsyncClient(timeout=5) as client:
+        results = await asyncio.gather(*(fetch(client, u) for u in urls),
+                                       return_exceptions=True)
+    for result in results:
+        print(type(result).__name__ if isinstance(result, BaseException) else result)
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: ขึ้นกับบริการที่เตรียมไว้; ตรวจ syntax เท่านั้น
+ผลเชิงพฤติกรรม TPL-HTTP: JSON หรือชื่อ exception ตามแต่ละ URL ตามลำดับ input
+
+[TPL-PUBSUB] รับ Pub/Sub ก่อนส่งข้อความ demo
+ใช้เมื่อ: โจทย์ live broadcast
+เปลี่ยนตรงนี้: channel และ payload; มี Redis localhost:6379
+[CODE TPL-PUBSUB]
+import asyncio  # รัน Redis async client
+import redis.asyncio as redis  # ต้องมี redis-py
+async def main():
+    r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+    try:
+        async with r.pubsub() as ps:
+            await ps.subscribe("exam:live")
+            async for message in ps.listen():  # รอ subscription acknowledgement
+                if message["type"] == "subscribe":
+                    break
+            await r.publish("exam:live", "hello")  # เขียน channel demo
+            async def receive():
+                async for message in ps.listen():
+                    if message["type"] == "message":
+                        return message["data"]
+            print(await asyncio.wait_for(receive(), timeout=2))
+    finally:
+        await r.aclose()
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: ขึ้นกับบริการที่เตรียมไว้; ตรวจ syntax เท่านั้น
+ผลเมื่อบริการพร้อมและไม่มี publisher อื่นใช้ channel demo: hello; offline ไม่มี replay
+
+[TPL-STREAM] เพิ่ม Stream event แล้วรับและ ACK ใน group
+ใช้เมื่อ: โจทย์งานที่ต้องติดตาม pending
+เปลี่ยนตรงนี้: stream/group/consumer; มี Redis localhost:6379
+[CODE TPL-STREAM]
+import asyncio  # รัน coroutine
+from uuid import uuid4  # แยก key demo ไม่ชนข้อมูลเก่า
+import redis.asyncio as redis
+async def main():
+    r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+    stream, group = "exam:events:" + uuid4().hex, "workers"
+    try:
+        await r.xadd(stream, {"value": "7"})  # เขียน demo ลง Stream
+        await r.xgroup_create(stream, group, id="0")  # อ่าน entry ที่มีอยู่
+        entries = await r.xreadgroup(group, "worker1", {stream: ">"}, count=1, block=1000)
+        for _, messages in entries:
+            for message_id, fields in messages:
+                print(int(fields["value"]) * 2)  # จัดการก่อน ACK
+                await r.xack(stream, group, message_id)
+        await r.expire(stream, 60)  # key demo หมดอายุภายหลัง
+    finally:
+        await r.aclose()
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: ขึ้นกับบริการที่เตรียมไว้; ตรวจ syntax เท่านั้น
+ผลเมื่อบริการพร้อม: 14; ตัวอย่างรอบเดียว ไม่ใช่ long-running worker/recovery
+
+[TPL-API] FastAPI และ WebSocket echo
+ใช้เมื่อ: โจทย์สร้าง API หรือรับข้อความต่อเนื่อง
+เปลี่ยนตรงนี้: path, payload; บันทึกเป็น answer_api.py
+[CODE TPL-API]
+import asyncio  # การรอแบบ async
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+app = FastAPI()
+@app.get("/delay")
+async def delay():
+    await asyncio.sleep(0.01)
+    return {"ok": True}
+@app.websocket("/ws")
+async def echo(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            message = await ws.receive_text()
+            await ws.send_text(message)
+    except WebSocketDisconnect:
+        pass
+[END CODE]
+ผลที่คาดหวัง: ขึ้นกับบริการที่เตรียมไว้; ตรวจ syntax เท่านั้น
+
+รัน TPL-API: python -m uvicorn answer_api:app --port 8000
+GET http://127.0.0.1:8000/delay -> {"ok": true}
+WebSocket ws://127.0.0.1:8000/ws -> ส่ง hello รับ hello
+ต้องมี FastAPI/Uvicorn; syntax ผ่าน แต่ไม่ได้รัน server ในการตรวจครั้งนี้
+
+[TPL-CHECK] ตรวจคำตอบก่อนส่ง
+- มี import และ entry point ตามรูปแบบที่โจทย์ต้องการไหม?
+- coroutine ถูก await/schedule และ task ทั้งหมดมีผู้รอหรือ cleanup ไหม?
+- output/return ชื่อฟังก์ชัน และ parameter ตรงข้อกำหนดไหม?
+- success/error/timeout/cancel มี resource cleanup ไหม?
+- อย่าเพิ่ม print ถ้าโจทย์ให้ return อย่างเดียวหรือมีระบบตรวจ output เป๊ะ
+- ตัวอย่าง local input ผ่านไม่ได้ยืนยันระบบ network จริง
+
+แหล่งเทียบรูปแบบ: Week3/task_*.py, Week7/server.py, Week8/01–08,
+Week9/student2_pit_strategy_engineer.py และ Week10/bot.py
