@@ -1,0 +1,1467 @@
+Redis — สรุปเนื้อหาแบบอ่านง่าย
+==============================
+
+เรียบเรียงจากเอกสาร Introduction to Redis, In-Memory Data Structure Stores จำนวน 23 หน้า
+โดยคงแนวคิด คำศัพท์ ตัวอย่าง และกรอบเนื้อหาตามเอกสารต้นฉบับ
+
+----------------------------------------------------------------
+
+สารบัญ
+------------
+
+1. Redis คืออะไร
+2. ทำไม Redis ถึงเร็ว
+3. Data Structures ของ Redis
+4. Single-Thread Architecture
+5. I/O Multiplexing
+6. Performance
+7. Production Use Cases
+8. Caching Layer
+9. Pub/Sub และ Queues
+10. Rate Limiting
+11. RDB vs AOF
+12. Redis ในฐานะ Messaging Engine
+13. Redis Pub/Sub
+14. Redis Streams
+15. Consumer Groups
+16. เปรียบเทียบ Pub/Sub กับ Streams
+17. Real-World Use Cases
+18. Telemetry Pipeline
+19. F1 Telemetry & Grand Prix Architecture
+20. สรุปจำก่อนสอบ
+
+----------------------------------------------------------------
+
+1. Redis คืออะไร
+================
+
+Redis คือระบบ In-Memory Data Structure Store
+
+แนวคิดหลักคือ Redis เก็บ Active Data ไว้ใน:
+
+[โค้ด / แผนภาพ : text]
+RAM (Main Memory)
+[จบโค้ด / แผนภาพ]
+
+แทนการทำงานกับข้อมูลจาก Disk เป็นหลักเหมือนฐานข้อมูลแบบดั้งเดิม
+
+ผลที่ได้
+------------
+
+- Latency ต่ำมาก
+- ประมวลผลข้อมูลได้เร็ว
+- รองรับ Operations จำนวนมาก
+- เหมาะกับระบบ Real-Time
+
+📌 หน้า 2–3: Core Fundamentals และ In-Memory Speed
+
+----------------------------------------------------------------
+
+2. ทำไม Redis ถึงเร็ว
+=====================
+
+2.1 เก็บข้อมูลใน RAM
+--------------------
+
+RAM มีความเร็วสูงกว่า Disk และไม่ต้องรอ Disk Seek / Heavy I/O
+
+เอกสารระบุว่า RAM Operations สามารถทำงานในระดับ:
+
+[โค้ด / แผนภาพ : text]
+Microseconds
+(< 1 ms)
+[จบโค้ด / แผนภาพ]
+
+จึงทำให้ Redis มี Sub-Millisecond Latency
+
+----------------------------------------------------------------
+
+2.2 High Throughput
+-------------------
+
+Redis สามารถรองรับ:
+
+[โค้ด / แผนภาพ : text]
+100,000+ Operations / Second
+[จบโค้ด / แผนภาพ]
+
+บน Hardware ระดับหนึ่งได้ตาม Benchmark ที่ระบุในเอกสาร
+
+----------------------------------------------------------------
+
+2.3 Volatile แต่ทำ Persistence ได้
+----------------------------------
+
+โดยธรรมชาติ RAM เป็น Memory แบบ Volatile
+
+แต่ Redis มีระบบ Persistence ที่สามารถบันทึกข้อมูลลง Disk ได้ เช่น:
+
+[โค้ด / แผนภาพ : text]
+RDB
+AOF
+[จบโค้ด / แผนภาพ]
+
+ดังนั้น Redis ไม่ได้หมายความว่า:
+
+ข้อมูลจะอยู่เฉพาะใน RAM และหายทั้งหมดเสมอไป
+
+แต่สามารถกำหนดวิธีเก็บข้อมูลลง Disk ได้
+
+📌 หน้า 3: Storage Medium, Sub-Millisecond Latency, High Throughput และ Persistence
+
+----------------------------------------------------------------
+
+3. Data Structures ของ Redis
+============================
+
+Redis ไม่ได้เก็บข้อมูลแบบ Key-Value ธรรมดาเพียงอย่างเดียว แต่รองรับ Data Structures
+หลายชนิด
+
+3.1 Strings
+------------
+
+เก็บได้ เช่น:
+
+- Text
+- Numbers
+- Binary Blobs
+- Atomic Counters
+
+ตัวอย่างแนวคิด:
+
+[โค้ด / แผนภาพ : text]
+key → value
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+3.2 Hashes
+------------
+
+เป็นโครงสร้างแบบ:
+
+[โค้ด / แผนภาพ : text]
+Field → Value
+[จบโค้ด / แผนภาพ]
+
+เหมาะกับการแทน Object
+
+ตัวอย่าง:
+
+[โค้ด / แผนภาพ : text]
+user
+ ├── name
+ ├── age
+ └── email
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+3.3 Lists
+------------
+
+เป็น Linked List
+
+สามารถใช้ทำ:
+
+- Message Queue
+- Stack
+
+----------------------------------------------------------------
+
+3.4 Sets
+------------
+
+เป็น Collection ที่:
+
+[โค้ด / แผนภาพ : text]
+ไม่เรียงลำดับ
++
+ข้อมูลไม่ซ้ำกัน
+[จบโค้ด / แผนภาพ]
+
+รองรับ Set Operations เช่น:
+
+[โค้ด / แผนภาพ : text]
+Union
+Intersection
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+3.5 Sorted Sets
+---------------
+
+ข้อมูลถูกจัดเรียงด้วย:
+
+[โค้ด / แผนภาพ : text]
+Score
+[จบโค้ด / แผนภาพ]
+
+เหมาะกับงานอย่าง:
+
+[โค้ด / แผนภาพ : text]
+Real-Time Leaderboard
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+3.6 Streams
+------------
+
+เป็นโครงสร้างแบบ:
+
+[โค้ด / แผนภาพ : text]
+Append-Only Log
+[จบโค้ด / แผนภาพ]
+
+เหมาะกับ:
+
+[โค้ด / แผนภาพ : text]
+Event Streaming
+[จบโค้ด / แผนภาพ]
+
+📌 หน้า 4: Core Data Structures
+
+----------------------------------------------------------------
+
+4. Single-Thread Architecture
+=============================
+
+Redis ใช้แนวคิด Single-Threaded Execution Core
+
+หมายถึงการประมวลผล Command หลักทำงานบน Thread เดียว
+
+ข้อดีตามเอกสาร:
+
+[โค้ด / แผนภาพ : text]
+ไม่ต้องจัดการ
+Race Conditions
+Locks
+Context Switching
+[จบโค้ด / แผนภาพ]
+
+ในส่วน Command Processing
+
+📌 หน้า 5: Single-Thread Architecture
+
+----------------------------------------------------------------
+
+5. I/O Multiplexing
+===================
+
+แม้ Redis ใช้ Single Thread แต่สามารถดูแล Client Connections จำนวนมากได้ด้วย:
+
+[โค้ด / แผนภาพ : text]
+I/O Multiplexing
+[จบโค้ด / แผนภาพ]
+
+โดยใช้กลไก เช่น:
+
+[โค้ด / แผนภาพ : text]
+epoll
+kqueue
+[จบโค้ด / แผนภาพ]
+
+แนวคิดคือใช้ Non-Blocking System Calls เพื่อ Monitor Client Sockets จำนวนมากพร้อมกัน
+
+[โค้ด / แผนภาพ : text]
+Client 1 ─┐
+Client 2 ─┤
+Client 3 ─┤
+Client 4 ─┼──► Redis Event Loop / I/O
+Client N ─┘
+[จบโค้ด / แผนภาพ]
+
+ดังนั้น Single Thread ไม่ได้หมายความว่า Redis รองรับ Client ได้เพียงคนเดียว
+
+📌 หน้า 5: ภาพ Architecture แสดง Event Loop และการจัดการ Requests/Connections
+
+----------------------------------------------------------------
+
+6. Performance
+==============
+
+Redis สามารถทำ:
+
+[โค้ด / แผนภาพ : text]
+100K+ Operations / Second
+[จบโค้ด / แผนภาพ]
+
+ตาม Benchmark ในเอกสาร
+
+ผลดีเมื่อใช้เป็น Cache Layer:
+
+[โค้ด / แผนภาพ : text]
+Application
+     │
+     ▼
+  Redis Cache
+     │
+     ▼
+Primary Database
+[จบโค้ด / แผนภาพ]
+
+Redis ช่วยลด:
+
+- CPU Load
+- Memory Load
+
+ของ Primary Database
+
+และให้ Response Time ระดับ Microseconds ตามที่เอกสารระบุ
+
+📌 หน้า 6: High Performance Benchmarks
+
+----------------------------------------------------------------
+
+7. Production Use Cases
+=======================
+
+เอกสารยกตัวอย่างการใช้งาน Redis ใน Production ได้แก่:
+
+[โค้ด / แผนภาพ : text]
+1. Caching Layer
+2. Pub/Sub & Queues
+3. Rate Limiting
+4. Real-Time Systems
+5. Messaging / Event Streaming
+[จบโค้ด / แผนภาพ]
+
+📌 หน้า 8–10: Common Production Use Cases
+
+----------------------------------------------------------------
+
+8. Caching Layer
+================
+
+Redis สามารถใช้เป็น Cache สำหรับข้อมูลที่ถูกเรียกใช้งานบ่อย หรือ Hot Data
+
+Pattern ที่เอกสารกล่าวถึง:
+
+[โค้ด / แผนภาพ : text]
+Cache-Aside
+Write-Through
+[จบโค้ด / แผนภาพ]
+
+เป้าหมายคือ:
+
+ลดเวลาในการตอบสนองของระบบ
+
+ตัวอย่างแนวคิด:
+
+[โค้ด / แผนภาพ : text]
+Client
+  │
+  ▼
+Application
+  │
+  ├──► Redis Cache
+  │
+  └──► Database
+[จบโค้ด / แผนภาพ]
+
+ถ้าข้อมูลอยู่ใน Redis ก็สามารถตอบกลับได้เร็วโดยไม่ต้องไปอ่าน Primary Database ทุกครั้ง
+
+📌 หน้า 8: Caching Layer
+
+----------------------------------------------------------------
+
+9. Pub/Sub และ Queues
+=====================
+
+Redis สามารถใช้สำหรับการส่ง Message และช่วย Decouple Microservices
+
+รูปแบบหลัก:
+
+[โค้ด / แผนภาพ : text]
+Producer
+    │
+    ▼
+ Redis
+    │
+    ├──► Subscriber
+    └──► Subscriber
+[จบโค้ด / แผนภาพ]
+
+เอกสารกล่าวถึงทั้ง:
+
+[โค้ด / แผนภาพ : text]
+Redis Pub/Sub
+Redis Streams
+Redis Lists
+[จบโค้ด / แผนภาพ]
+
+สำหรับการทำ Messaging / Queue
+
+📌 หน้า 9: Pub/Sub & Queues
+
+----------------------------------------------------------------
+
+10. Rate Limiting
+=================
+
+Redis สามารถใช้ทำ:
+
+[โค้ด / แผนภาพ : text]
+Rate Limiting
+[จบโค้ด / แผนภาพ]
+
+โดยเอกสารยกตัวอย่าง:
+
+[โค้ด / แผนภาพ : text]
+Sliding Window Algorithm
+[จบโค้ด / แผนภาพ]
+
+สำหรับ:
+
+- API Gateway Protection
+- Live Leaderboards
+
+แนวคิดคือจำกัดจำนวน Request/Operation ที่ User สามารถทำได้ภายในช่วงเวลาหนึ่ง
+
+📌 หน้า 10: Rate Limiting
+
+----------------------------------------------------------------
+
+11. RDB vs AOF
+==============
+
+Redis มี Persistence หลักที่เอกสารเน้น 2 แบบ:
+
+[โค้ด / แผนภาพ : text]
+RDB
+AOF
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+11.1 RDB — Redis Database
+-------------------------
+
+RDB สร้าง:
+
+[โค้ด / แผนภาพ : text]
+Point-in-Time Snapshot
+[จบโค้ด / แผนภาพ]
+
+เป็น Compact Binary Snapshot
+
+ข้อดีตามเอกสาร:
+
+- Recovery เร็ว
+- Runtime Performance Impact ต่ำ
+
+ภาพรวม:
+
+[โค้ด / แผนภาพ : text]
+Redis Memory
+     │
+     ▼
+ Snapshot
+     │
+     ▼
+   Disk
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+11.2 AOF — Append-Only File
+---------------------------
+
+AOF บันทึก:
+
+[โค้ด / แผนภาพ : text]
+ทุก Write Operation
+[จบโค้ด / แผนภาพ]
+
+แบบ Sequential Log
+
+ข้อดี:
+
+- Data Durability สูง
+- กำหนด Sync Interval ได้
+
+ภาพรวม:
+
+[โค้ด / แผนภาพ : text]
+WRITE 1 ─┐
+WRITE 2 ─┤
+WRITE 3 ─┼──► AOF
+WRITE 4 ─┘
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+RDB vs AOF จำง่าย
+-----------------
+
+- หัวข้อ: รูปแบบ
+  RDB: Snapshot
+  AOF: Log ทุก Write
+
+- หัวข้อ: Recovery
+  RDB: เร็ว
+  AOF: เน้นความทนทานของข้อมูล
+
+- หัวข้อ: File
+  RDB: Compact Binary
+  AOF: Append-Only Log
+
+- หัวข้อ: จุดเด่น
+  RDB: Runtime Impact ต่ำ
+  AOF: Durability สูง
+
+
+📌 หน้า 11: Data Persistence Options
+
+----------------------------------------------------------------
+
+12. Redis ในฐานะ Messaging Engine
+=================================
+
+Redis เหมาะกับ Messaging เพราะ:
+
+[โค้ด / แผนภาพ : text]
+In-Memory
++
+Ultra-Low Latency
++
+High Throughput
+[จบโค้ด / แผนภาพ]
+
+เอกสารระบุรูปแบบ Messaging สำคัญ 3 แบบ:
+
+[โค้ด / แผนภาพ : text]
+1. Pub/Sub
+2. Redis Streams
+3. Lists
+[จบโค้ด / แผนภาพ]
+
+Pub/Sub
+------------
+
+[โค้ด / แผนภาพ : text]
+Fire-and-Forget
+[จบโค้ด / แผนภาพ]
+
+Streams
+------------
+
+[โค้ด / แผนภาพ : text]
+Persistent Event Streams
+[จบโค้ด / แผนภาพ]
+
+Lists
+------------
+
+สามารถใช้ทำ:
+
+[โค้ด / แผนภาพ : text]
+Message Queue
+[จบโค้ด / แผนภาพ]
+
+เช่น:
+
+[โค้ด / แผนภาพ : text]
+LPUSH
+BRPOP
+[จบโค้ด / แผนภาพ]
+
+📌 หน้า 13: Why Redis for Messaging?
+
+----------------------------------------------------------------
+
+13. Redis Pub/Sub
+=================
+
+Publish–Subscribe Pattern
+-------------------------
+
+มี:
+
+[โค้ด / แผนภาพ : text]
+Publisher
+    │
+    ▼
+ Channel
+    │
+    ├──► Subscriber A
+    ├──► Subscriber B
+    └──► Subscriber C
+[จบโค้ด / แผนภาพ]
+
+Publisher ไม่จำเป็นต้องรู้ว่า Subscriber คือใคร
+
+คำสั่งสำคัญ:
+
+[โค้ด / แผนภาพ : text]
+PUBLISH channel message
+
+SUBSCRIBE channel
+
+PSUBSCRIBE pattern*
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+จุดสำคัญที่สุด: At-Most-Once
+----------------------------
+
+Redis Pub/Sub เป็น:
+
+At-most-once delivery
+
+หรือในเอกสารเรียกว่า:
+
+Fire-and-Forget
+
+ถ้า Subscriber Offline ตอนที่ Message ถูก Publish:
+
+[โค้ด / แผนภาพ : text]
+Message
+   ↓
+Subscriber Offline
+   ↓
+❌ Message หาย
+[จบโค้ด / แผนภาพ]
+
+ไม่มี Message History ให้ย้อนกลับมาอ่าน
+
+📌 หน้า 14: Redis Pub/Sub
+
+----------------------------------------------------------------
+
+14. Redis Streams
+=================
+
+Redis Streams เป็น:
+
+Append-Only Log Data Structure
+
+เริ่มมีใน Redis 5.0 ตามเอกสาร
+
+โครงสร้าง:
+
+[โค้ด / แผนภาพ : text]
+Stream
+ │
+ ├── Event 1
+ ├── Event 2
+ ├── Event 3
+ ├── Event 4
+ └── Event 5
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+14.1 Persistence
+----------------
+
+Message สามารถ:
+
+[โค้ด / แผนภาพ : text]
+อยู่ใน Memory
++
+บันทึกลง Disk
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+14.2 Unique ID
+--------------
+
+แต่ละ Message จะมี ID ที่ Redis สร้างให้อัตโนมัติ เช่น:
+
+[โค้ด / แผนภาพ : text]
+1690000000000-0
+[จบโค้ด / แผนภาพ]
+
+ลักษณะ ID ประกอบด้วย Timestamp และ Sequence
+
+----------------------------------------------------------------
+
+14.3 Replayability
+------------------
+
+Consumer สามารถอ่าน Message เก่าได้
+
+เช่น:
+
+[โค้ด / แผนภาพ : text]
+Event 1
+Event 2
+Event 3
+Event 4
+[จบโค้ด / แผนภาพ]
+
+ถ้า Consumer พลาด Event 2 ก็สามารถอ่านย้อนหลังจากจุดที่ต้องการได้
+
+📌 หน้า 16: Pattern 2 — Redis Streams
+
+----------------------------------------------------------------
+
+15. Consumer Groups
+===================
+
+Consumer Groups ใช้เมื่อมี Consumer หลายตัวช่วยกันประมวลผล Stream
+
+[โค้ด / แผนภาพ : text]
+             Redis Stream
+                  │
+        ┌─────────┴─────────┐
+        ▼                   ▼
+   Consumer 1          Consumer 2
+[จบโค้ด / แผนภาพ]
+
+แต่ละ Message สามารถถูกส่งไปยัง Consumer ที่แตกต่างกันภายใน Group
+
+----------------------------------------------------------------
+
+Load Balancing
+--------------
+
+Consumer หลายตัว:
+
+[โค้ด / แผนภาพ : text]
+Consumer 1 → งาน A
+Consumer 2 → งาน B
+Consumer 3 → งาน C
+[จบโค้ด / แผนภาพ]
+
+ช่วยแบ่งภาระการประมวลผล
+
+----------------------------------------------------------------
+
+At-Least-Once Delivery
+----------------------
+
+Consumer ต้อง Acknowledge Message ด้วย:
+
+[โค้ด / แผนภาพ : text]
+XACK
+[จบโค้ด / แผนภาพ]
+
+แนวคิด:
+
+[โค้ด / แผนภาพ : text]
+รับ Message
+     ↓
+ประมวลผล
+     ↓
+XACK
+     ↓
+ถือว่างานถูก Acknowledge
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+Pending Entries List — PEL
+--------------------------
+
+Redis จะติดตาม Message ที่ยังไม่ได้รับการ Acknowledge
+
+เรียกว่า:
+
+[โค้ด / แผนภาพ : text]
+Pending Entries List (PEL)
+[จบโค้ด / แผนภาพ]
+
+มีประโยชน์เมื่อ Consumer Crash เพราะสามารถติดตามงานที่ยังค้างอยู่ได้
+
+📌 หน้า 17: Advanced Streams — Consumer Groups
+
+----------------------------------------------------------------
+
+16. เปรียบเทียบ Pub/Sub กับ Streams
+===================================
+
+นี่คือหัวข้อที่ควรจำมากที่สุด ⭐
+
+- หัวข้อ: แนวคิด
+  Redis Pub/Sub: Fire-and-Forget
+  Redis Streams: Persistent Event Stream
+
+- หัวข้อ: การเก็บ Message
+  Redis Pub/Sub: ❌ ไม่มี History
+  Redis Streams: ✅ เก็บ Message
+
+- หัวข้อ: Offline Consumer
+  Redis Pub/Sub: ❌ พลาดแล้วหาย
+  Redis Streams: ✅ อ่านย้อนหลังได้
+
+- หัวข้อ: Replay
+  Redis Pub/Sub: ❌ ไม่ได้
+  Redis Streams: ✅ ได้
+
+- หัวข้อ: Delivery
+  Redis Pub/Sub: At-Most-Once
+  Redis Streams: รองรับ At-Least-Once ผ่าน Consumer Groups
+
+- หัวข้อ: Consumer Groups
+  Redis Pub/Sub: ❌
+  Redis Streams: ✅
+
+- หัวข้อ: Acknowledge
+  Redis Pub/Sub: ❌
+  Redis Streams: ✅ XACK
+
+- หัวข้อ: เหมาะกับ
+  Redis Pub/Sub: Real-Time Broadcast
+  Redis Streams: Event Processing
+
+
+จำสั้น ๆ
+------------
+
+[โค้ด / แผนภาพ : text]
+Pub/Sub
+= เร็ว + สด + ไม่เก็บ
+
+Streams
+= เก็บ + ย้อนอ่าน + ประมวลผลเป็นระบบ
+[จบโค้ด / แผนภาพ]
+
+📌 หน้า 14–17: Pub/Sub และ Streams
+
+----------------------------------------------------------------
+
+17. Real-World Use Cases
+========================
+
+Use Case 1 — Real-Time Dashboard & Chat
+---------------------------------------
+
+ใช้:
+
+[โค้ด / แผนภาพ : text]
+Redis Pub/Sub
+[จบโค้ด / แผนภาพ]
+
+เหมาะกับ:
+
+- Instant WebSocket Broadcasting
+- Live Audio/Video Chat Signaling
+- Real-Time Notifications
+
+เหตุผลคือไม่จำเป็นต้องเก็บ Message History ทุกข้อความ
+
+📌 หน้า 19 และ 21: Real-Time Dashboard & Chat
+
+----------------------------------------------------------------
+
+Use Case 2 — Order Processing Pipeline
+--------------------------------------
+
+ใช้:
+
+[โค้ด / แผนภาพ : text]
+Redis Streams
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่าง:
+
+[โค้ด / แผนภาพ : text]
+Order Service
+     │
+     ▼
+Redis Stream
+     │
+     ├──► Payment Service
+     │
+     └──► Inventory Service
+[จบโค้ด / แผนภาพ]
+
+เหมาะกับระบบ E-Commerce Checkout
+
+📌 หน้า 19: Order Processing Pipeline
+
+----------------------------------------------------------------
+
+Use Case 3 — Rate Limiting & Event Sourcing
+-------------------------------------------
+
+ใช้:
+
+[โค้ด / แผนภาพ : text]
+Redis Streams
+[จบโค้ด / แผนภาพ]
+
+สามารถเก็บ User Activity Events พร้อม Timestamp เพื่อใช้กับ:
+
+[โค้ด / แผนภาพ : text]
+Audit Logs
+[จบโค้ด / แผนภาพ]
+
+📌 หน้า 19: Rate Limiting & Event Sourcing
+
+----------------------------------------------------------------
+
+18. Telemetry Pipeline
+======================
+
+เอกสารยกตัวอย่าง Redis Streams กับ IoT Telemetry
+
+Sensor ส่งข้อมูลความถี่สูง:
+
+[โค้ด / แผนภาพ : text]
+IoT Sensor
+    │
+    │ High-Frequency Data
+    ▼
+Redis Stream
+    │
+    ├──► Worker 1
+    ├──► Worker 2
+    └──► Worker 3
+[จบโค้ด / แผนภาพ]
+
+Redis Stream ทำหน้าที่เป็น Buffer ระหว่าง:
+
+[โค้ด / แผนภาพ : text]
+High-Frequency Sensors
+          ↓
+     Redis Stream
+          ↓
+Backend / Database
+[จบโค้ด / แผนภาพ]
+
+ช่วยป้องกัน Backend Database ถูกโหลดหนักเกินไป
+
+----------------------------------------------------------------
+
+จุดเด่นจากเอกสาร
+----------------
+
+ข้อมูลถูกเก็บเป็น:
+
+[โค้ด / แผนภาพ : text]
+Immutable
++
+Ordered
++
+Time-Series Entries
+[จบโค้ด / แผนภาพ]
+
+และมี Unique IDs อัตโนมัติ
+
+Consumer สามารถ:
+
+[โค้ด / แผนภาพ : text]
+อ่านข้อมูลเก่า
+Replay Event
+[จบโค้ด / แผนภาพ]
+
+และ Worker หลายตัวสามารถแบ่งงานกันประมวลผล พร้อมใช้:
+
+[โค้ด / แผนภาพ : text]
+XACK
+[จบโค้ด / แผนภาพ]
+
+📌 หน้า 20: Telemetry Data Pipeline
+
+----------------------------------------------------------------
+
+19. F1 Telemetry & Grand Prix Architecture
+==========================================
+
+หน้า 23 เป็นตัวอย่างการรวม:
+
+[โค้ด / แผนภาพ : text]
+Redis Streams
++
+Consumer Groups
++
+Live Pub/Sub
+[จบโค้ด / แผนภาพ]
+
+เข้าด้วยกันในระบบ F1
+
+----------------------------------------------------------------
+
+Teacher Race Control
+--------------------
+
+กำหนดสถานะการแข่งขัน:
+
+[โค้ด / แผนภาพ : text]
+SET f1:race:status = "GREEN"
+[จบโค้ด / แผนภาพ]
+
+จากนั้นส่ง Start Signal Broadcast
+
+----------------------------------------------------------------
+
+Student 1 — F1 Car
+------------------
+
+รถสร้าง Telemetry ต่อเนื่อง:
+
+[โค้ด / แผนภาพ : text]
+20 Hz
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่างข้อมูล:
+
+[โค้ด / แผนภาพ : text]
+speed = 280
+gear = 7
+rpm = 13500
+dist = 2450.5m
+[จบโค้ด / แผนภาพ]
+
+ข้อมูลถูกส่งเข้า:
+
+[โค้ด / แผนภาพ : text]
+Redis Stream
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+Student 2 — Pit Strategy
+------------------------
+
+อ่านข้อมูล Telemetry เพื่อดู:
+
+[โค้ด / แผนภาพ : text]
+Tire Wear
+[จบโค้ด / แผนภาพ]
+
+และตัดสินใจ:
+
+[โค้ด / แผนภาพ : text]
+BOX BOX BOX
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+Student 3 — Race Safety
+-----------------------
+
+ตรวจสอบ:
+
+[โค้ด / แผนภาพ : text]
+Engine Temperature
+RPM
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+Student 4 — DRS Control
+-----------------------
+
+ควบคุม:
+
+[โค้ด / แผนภาพ : text]
+DRS
+OPEN / CLOSE
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+Student 5 — Broadcaster
+-----------------------
+
+ส่งข้อมูล Live Dashboard ผ่าน:
+
+[โค้ด / แผนภาพ : text]
+PUB/SUB
+[จบโค้ด / แผนภาพ]
+
+Channel:
+
+[โค้ด / แผนภาพ : text]
+f1:dashboard:g01
+[จบโค้ด / แผนภาพ]
+
+Dashboard แสดงข้อมูล เช่น:
+
+[โค้ด / แผนภาพ : text]
+Speed: 285 km/h
+Gear: 7
+RPM: 13,500
+Distance
+Leaderboard Telemetry
+[จบโค้ด / แผนภาพ]
+
+📌 หน้า 23: F1 Telemetry Data Pipeline & Grand Prix Architecture
+
+----------------------------------------------------------------
+
+20. Flow รวมทั้งบท
+==================
+
+[โค้ด / แผนภาพ : text]
+                     ┌────────────────────┐
+                     │       Redis        │
+                     │  In-Memory Store   │
+                     └─────────┬──────────┘
+                               │
+             ┌─────────────────┼─────────────────┐
+             │                 │                 │
+             ▼                 ▼                 ▼
+         Cache              Pub/Sub          Streams
+             │                 │                 │
+             │                 │                 ├──► Consumer
+             │                 │                 ├──► Consumer
+             │                 │                 └──► Consumer
+             │                 │
+             │                 └──► Subscribers
+             │
+             ▼
+         Database
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+21. จุดที่ควรจำก่อนสอบ ⭐⭐⭐
+==========================
+
+⭐ Redis คืออะไร?
+----------------
+
+In-Memory Data Structure Store
+
+----------------------------------------------------------------
+
+⭐ Redis เร็วเพราะอะไร?
+----------------------
+
+[โค้ด / แผนภาพ : text]
+RAM
+ ↓
+ไม่ต้องรอ Disk I/O
+ ↓
+Sub-Millisecond Latency
+ ↓
+High Throughput
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+⭐ Redis Data Structures
+-----------------------
+
+จำ:
+
+[โค้ด / แผนภาพ : text]
+String
+Hash
+List
+Set
+Sorted Set
+Stream
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+⭐ Redis Single Thread
+---------------------
+
+[โค้ด / แผนภาพ : text]
+Command Processing
+        ↓
+   Single Thread
+[จบโค้ด / แผนภาพ]
+
+แต่สามารถรองรับ Client จำนวนมากด้วย:
+
+[โค้ด / แผนภาพ : text]
+I/O Multiplexing
+(epoll / kqueue)
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+⭐ Redis Pub/Sub
+---------------
+
+จำว่า:
+
+[โค้ด / แผนภาพ : text]
+Fire-and-Forget
+At-Most-Once
+No History
+No Replay
+[จบโค้ด / แผนภาพ]
+
+ถ้า Subscriber Offline:
+
+[โค้ด / แผนภาพ : text]
+❌ Message หาย
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+⭐ Redis Streams
+---------------
+
+จำว่า:
+
+[โค้ด / แผนภาพ : text]
+Append-Only Log
+Persistent
+Replayable
+Unique ID
+[จบโค้ด / แผนภาพ]
+
+เหมาะกับ:
+
+[โค้ด / แผนภาพ : text]
+Event Processing
+Telemetry
+Order Pipeline
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+⭐ Consumer Groups
+-----------------
+
+จำว่า:
+
+[โค้ด / แผนภาพ : text]
+หลาย Consumer
+      ↓
+แบ่งงานกัน
+      ↓
+Load Balancing
+[จบโค้ด / แผนภาพ]
+
+และมี:
+
+[โค้ด / แผนภาพ : text]
+XACK
+PEL
+At-Least-Once
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+⭐ RDB vs AOF
+------------
+
+[โค้ด / แผนภาพ : text]
+RDB
+= Snapshot
+= Recovery เร็ว
+= Runtime Impact ต่ำ
+
+AOF
+= Log ทุก Write
+= Durability สูง
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+22. ตารางจำเร็ว
+===============
+
+- คำศัพท์: Redis
+  จำว่า: In-Memory Data Structure Store
+
+- คำศัพท์: RAM
+  จำว่า: Storage หลักของ Active Data
+
+- คำศัพท์: Sub-Millisecond
+  จำว่า: Latency ต่ำกว่า 1 ms
+
+- คำศัพท์: String
+  จำว่า: Text / Number / Binary / Counter
+
+- คำศัพท์: Hash
+  จำว่า: Field–Value
+
+- คำศัพท์: List
+  จำว่า: Linked List / Queue / Stack
+
+- คำศัพท์: Set
+  จำว่า: Unique / Unordered
+
+- คำศัพท์: Sorted Set
+  จำว่า: Sort ตาม Score
+
+- คำศัพท์: Stream
+  จำว่า: Append-Only Log
+
+- คำศัพท์: Pub/Sub
+  จำว่า: Fire-and-Forget
+
+- คำศัพท์: At-Most-Once
+  จำว่า: พลาดแล้วไม่ส่งซ้ำ
+
+- คำศัพท์: Stream
+  จำว่า: Persistent / Replayable
+
+- คำศัพท์: Consumer Group
+  จำว่า: แบ่งงานหลาย Consumer
+
+- คำศัพท์: XACK
+  จำว่า: Acknowledge Message
+
+- คำศัพท์: PEL
+  จำว่า: Pending Entries List
+
+- คำศัพท์: RDB
+  จำว่า: Snapshot
+
+- คำศัพท์: AOF
+  จำว่า: Append-Only Write Log
+
+- คำศัพท์: Cache
+  จำว่า: เก็บ Hot Data
+
+- คำศัพท์: Rate Limiting
+  จำว่า: จำกัด Request
+
+- คำศัพท์: I/O Multiplexing
+  จำว่า: จัดการ Socket จำนวนมาก
+
+
+----------------------------------------------------------------
+
+23. จำแบบสั้นที่สุด 🧠
+=====================
+
+Redis = RAM + Data Structures + Speed
+
+Redis เร็วเพราะ Active Data อยู่ใน RAM
+
+Single Thread ไม่ได้แปลว่ารับ Client ได้คนเดียว
+
+I/O Multiplexing = จัดการ Connections จำนวนมาก
+
+Pub/Sub = ส่งทันที แต่ไม่เก็บ
+
+Pub/Sub = At-Most-Once
+
+Streams = เก็บ Event และ Replay ได้
+
+Consumer Groups = แบ่งงานกันประมวลผล
+
+XACK = ยืนยันว่า Process แล้ว
+
+PEL = ติดตาม Message ที่ยังไม่ Acknowledge
+
+RDB = Snapshot
+
+AOF = Log ทุก Write
+
+Cache = ลดภาระ Database
+
+----------------------------------------------------------------
+
+24. จุดที่มักเอาไปออกข้อสอบ ⭐
+=============================
+
+ถ้าถามว่า “ต้องการ Real-Time Notification และไม่สนใจ History”
+-------------------------------------------------------------
+
+ตอบ:
+
+[โค้ด / แผนภาพ : text]
+Redis Pub/Sub
+[จบโค้ด / แผนภาพ]
+
+เพราะเป็น Fire-and-Forget และส่งให้ Subscriber ที่กำลัง Online
+
+----------------------------------------------------------------
+
+ถ้าถามว่า “ต้องการเก็บ Event และอ่านย้อนหลัง”
+---------------------------------------------
+
+ตอบ:
+
+[โค้ด / แผนภาพ : text]
+Redis Streams
+[จบโค้ด / แผนภาพ]
+
+เพราะมี Persistence และ Replayability
+
+----------------------------------------------------------------
+
+ถ้าถามว่า “Consumer หลายตัวช่วยกันทำงาน”
+----------------------------------------
+
+ตอบ:
+
+[โค้ด / แผนภาพ : text]
+Consumer Groups
+[จบโค้ด / แผนภาพ]
+
+และเกี่ยวข้องกับ:
+
+[โค้ด / แผนภาพ : text]
+Load Balancing
+XACK
+PEL
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+ถ้าถามว่า “ทำไม Redis เร็ว”
+---------------------------
+
+ตอบประเด็นหลัก:
+
+[โค้ด / แผนภาพ : text]
+In-Memory / RAM
++
+Sub-Millisecond Latency
++
+Single-Thread Command Processing
++
+I/O Multiplexing
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+ถ้าถามว่า “RDB กับ AOF ต่างกันอย่างไร”
+--------------------------------------
+
+จำ:
+
+[โค้ด / แผนภาพ : text]
+RDB → Snapshot
+AOF → Log ทุก Write
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+ถ้าถามว่า “Redis Streams เหมาะกับอะไร”
+--------------------------------------
+
+ตัวอย่างจากเอกสาร:
+
+[โค้ด / แผนภาพ : text]
+Order Processing
+IoT Telemetry
+Event Sourcing
+Rate Limiting
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+25. ภาพรวมทั้งบทในประโยคเดียว
+=============================
+
+Redis คือ In-Memory Data Structure Store ที่เน้นความเร็วสูง และสามารถนำไปใช้ได้ทั้ง
+Cache, Pub/Sub, Message Queue และ Persistent Event Streaming โดย Pub/Sub เน้น Real-Time
+แบบ Fire-and-Forget ส่วน Streams เน้นการเก็บ Event, Replay และการประมวลผลร่วมกันผ่าน
+Consumer Groups
+
+----------------------------------------------------------------
+
+อ้างอิงจากเอกสาร
+----------------
+
+- หน้า 3–6: In-Memory Speed, Data Structures, Single-Thread Architecture และ Performance
+  fileciteturn7file0L8-L48
+- หน้า 8–11: Caching, Pub/Sub/Queues, Rate Limiting และ RDB/AOF
+  fileciteturn7file0L53-L79
+- หน้า 13–17: Redis Messaging, Pub/Sub, Streams และ Consumer Groups
+  fileciteturn7file0L85-L117
+- หน้า 19–21: Real-World Use Cases, Telemetry และ Pub/Sub Monitoring
+  fileciteturn7file0L120-L155
+- หน้า 23: F1 Telemetry Data Pipeline & Grand Prix Architecture
+  fileciteturn7file0L161-L197
