@@ -1,3 +1,50 @@
+บท 9 — อ่านสถาปัตยกรรม Tank Battle จากโค้ดจริง
+========================================================================
+
+[TANK-01] Data flow
+tank.py / bot.py -> game:commands -> server.py
+server.py -> game:state -> bot.py / dashboard.py / web_dashboard.py
+web_dashboard.py -> WebSocket -> browser
+Server เป็นผู้ตัดสินกฎและ state; client ส่งเจตนาหรือ action
+Redis เป็นตัวกลาง messaging ไม่ใช่ผู้คำนวณ physics ของเกม
+
+หน้าที่ไฟล์
+server.py: SecureTankGameServer รับ command, ตรวจ rule, update และ broadcast
+bot.py: listen_game_state รับ state; brain_loop ตัดสินใจและส่ง action
+tank.py: Keyboard input และ Redis client แบบ synchronous; ไม่ใช่ทุกไฟล์ใช้ asyncio
+dashboard.py: dashboard terminal; web_dashboard.py: FastAPI + WebSocket
+
+[TANK-02] ค่าจริงของ server.py ณ commit ฐาน 058b3fe
+GRID_SIZE = 50
+TICK_RATE = 0.2 วินาที -> เป้าหมายประมาณ 5 tick/วินาที ก่อน overhead
+FIRE_COOLDOWN = 0.5 วินาที
+MAX_ACTIVE_BULLETS = 2
+GAME_DURATION = 180 วินาที
+โน้ต Tank_Battle_อ่านง่าย เดิมมีหัวข้อ 10 FPS: นั่นไม่ใช่ค่าของ server.py เวอร์ชันนี้
+sleep(0.2) หลังทำงาน ไม่รับประกันอัตรา 5 FPS เป๊ะ เพราะมีเวลาประมวลผลเพิ่ม
+
+[TANK-03] งานที่เดินร่วมกัน
+run ของ server สร้าง task listen_commands และ wait_for_host_input
+แล้ว await game_loop; ต้องมีการพักรอใน loop จึงให้ listener เดินต่อ
+run ของ bot ใช้ gather(listen_game_state(), brain_loop())
+การแยก listener กับ loop ทำให้รับข่าวกับการตัดสินใจมี lifecycle ทับซ้อนกัน
+
+[TANK-04] วิเคราะห์โจทย์เกม
+ถามใครเป็น source of truth -> server state
+ถาม game:commands/game:state -> คำสั่งเข้า/สถานะออกตามลำดับ
+ถาม cooldown -> ลดคำสั่งที่อนุญาตถี่เกิน ไม่ใช่ Lock
+ถามคน offline -> Pub/Sub ไม่ replay ต้องรอ state update ใหม่/ออกแบบ snapshot
+ถาม dashboard lag -> ดู listener, broadcast, ผู้รับช้า และจังหวะ publish
+ถาม CPU loop หนัก -> async อย่างเดียวไม่ช่วย ต้องลดงาน/แบ่งงานที่เหมาะสม
+
+ก่อนรันต้นฉบับ: init_game เรียก flushdb ซึ่งล้าง Redis database ที่เลือก
+ในการตรวจคู่มือนี้ไม่ได้รัน server เกมหรือ flushdb
+
+========================================================================
+ภาคผนวก — โน้ตเดิมแปลงเป็นข้อความ (เก็บเนื้อหาไว้สำหรับอ่านละเอียด)
+ข้อสังเกต: โน้ตอาจอธิบายตัวอย่างคนละเวอร์ชันกับโค้ดปัจจุบัน
+ให้ใช้บทนำของคู่มือนี้เมื่อเปรียบเทียบค่าจริงกับ repo
+
 Asynchronous Architecture in Tank Battle Game — สรุปเนื้อหาแบบอ่านง่าย
 ======================================================================
 

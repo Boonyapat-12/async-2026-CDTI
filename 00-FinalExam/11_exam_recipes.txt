@@ -1,0 +1,48 @@
+บท 10 — สูตรตอบโจทย์และลำดับตรวจโค้ด
+========================================================================
+
+[RECIPE-01] เลือกเครื่องมือใน 10 วินาที
+ต้องการผลทุกงานตาม input -> gather [GATHER-01]
+ต้องการดูงานที่เสร็จก่อน -> wait FIRST_COMPLETED [WAIT-01]
+รอหนึ่งงานพร้อมกำหนดเวลา -> wait_for [TIME-01]
+หลายงานแก้ข้อมูลร่วมใน loop เดียว -> Lock [LOCK-02]
+ผลิตและรับงานคนละความเร็ว -> Queue + maxsize [QUEUE-03]
+รอทุก item ถูกจัดการ -> task_done + join [QUEUE-02]
+live broadcast ข้าม process -> Pub/Sub [PUBSUB-01]
+อ่านย้อนหลัง/ติดตาม pending -> Stream + group + ack [STREAM-02]
+browser รับ update ต่อเนื่อง -> WebSocket [WS-01]
+
+[RECIPE-02] โครงตอบข้ออธิบาย
+นิยาม -> กลไก -> จุดใช้ในโค้ด -> ผลที่เกิด -> ข้อจำกัด
+เช่น Lock: จำกัด task ที่เข้า critical section ทีละตัว โดยใช้ lock ร่วมกัน
+ครอบการตรวจและเปลี่ยนข้อมูล ป้องกัน stale read ใน loop เดียว
+ไม่ใช่การป้องกันหลาย server process
+
+[RECIPE-03] โครงตอบโจทย์อ่านโค้ด
+1. ดู entry point และค่าตั้งต้น
+2. แยก coroutine ที่เรียกเฉย ๆ ออกจาก task ที่ schedule
+3. ตาม dependency และจุด await
+4. จด shared state ก่อน/หลังการพัก
+5. แยกลำดับผลลัพธ์จากลำดับเสร็จ
+6. ตรวจ exception, cancellation และ resource cleanup
+7. ถ้าลำดับขึ้นกับ scheduling ให้บอกสิ่งที่รับประกันและสิ่งที่ไม่รับประกัน
+
+[RECIPE-04] โจทย์เวลา
+sleep เป็นการจำลองรอ ไม่ใช่ CPU คำนวณ
+sequential เวลาประมาณผลรวม; concurrent อิสระประมาณเวลาช้าที่สุด
+ถ้ามี lock ครอบการรอทุกงาน งานส่วนที่ล็อกยังเรียงกัน
+bounded queue จำกัด buffer ไม่ได้กำหนดจำนวน worker
+
+[RECIPE-05] โจทย์เลือกตอบสองข้อ
+อ่านทุกตัวเลือกแยกกัน ตรวจคำว่าเสมอ/ทันที/ทุก process/รับประกัน
+เลือกสองข้อพอดี ข้อที่ถูกครึ่งเดียวไม่ถือว่าถูก
+ใช้รหัสค้น ไม่ตัดสินจากชื่อคำสั่งอย่างเดียว เช่น join ไม่ได้แปลว่า worker หยุด
+
+[RECIPE-06] คำสั่งอ่านและค้นจาก root ของ repo
+PowerShell:
+Get-Content -Raw -Encoding utf8 .\00-FinalExam\12_openbook_all.txt
+Select-String -Path .\00-FinalExam\12_openbook_all.txt -SimpleMatch '[LOCK-02]' -Context 0,18
+Select-String -Path .\00-FinalExam\13_practice_exam_with_answers.txt -SimpleMatch 'เฉลยข้อ 07' -Context 0,16
+Linux/macOS:
+less 00-FinalExam/12_openbook_all.txt
+ใน less พิมพ์ /[LOCK-02] แล้ว Enter; n ไปผลถัดไป; q ออก

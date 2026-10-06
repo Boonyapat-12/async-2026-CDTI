@@ -1,0 +1,2350 @@
+บท 1 — พื้นฐาน Asynchronous Programming
+========================================================================
+
+[BASE-01] ภาพใหญ่: ทำไมต้อง Async?
+โปรแกรมที่รอเครือข่าย ฐานข้อมูล หรือเวลาจำลอง มักมีช่วงที่ CPU ยังทำงานอื่นได้
+Async ช่วยให้งานอื่นเดินต่อระหว่างรอ โดยต้องใช้คำสั่งและไลบรารีที่รองรับ
+การใส่ async def อย่างเดียวไม่ได้เปลี่ยนโค้ด blocking ให้ไม่บล็อก
+
+คำศัพท์ที่ต้องแยก
+- Synchronous: ทำขั้นตอนตามลำดับ ผู้เรียกต้องรอขั้นตอนนั้นคืนการควบคุม
+- Asynchronous: จัดการงานที่ยังไม่เสร็จ และกลับมาทำต่อเมื่อพร้อม
+- Concurrency: หลายงานมีช่วงชีวิตทับซ้อนกัน อาจสลับทำบน CPU เดียว
+- Parallelism: หลายงานประมวลผลพร้อมกันจริง เช่นหลาย process บนหลาย core
+- I/O-bound: เวลาส่วนใหญ่รอข้อมูล เหมาะกับ async I/O หรือ thread
+- CPU-bound: เวลาส่วนใหญ่คำนวณ Python ล้วน มักพิจารณาหลาย process
+
+[BASE-02] เลือกวิธีทำงาน
+งานสั้นตามลำดับ -> synchronous อ่านและตรวจง่าย
+รอ HTTP จำนวนมาก -> asyncio + async HTTP client
+ไลบรารี I/O แบบ blocking -> thread หรือ asyncio.to_thread()
+งานคำนวณ Python หนัก -> process; อย่าสรุปว่า asyncio ทำให้เร็วเสมอ
+thread แชร์หน่วยความจำใน process; process แยกหน่วยความจำตามปกติ
+GIL ใน CPython แบบปกติจำกัดการรัน Python bytecode หลาย thread พร้อมกัน
+แต่ไม่ควรเหมารวมทุก Python build หรือ native library ว่ามีพฤติกรรมเดียวกัน
+
+[BASE-03] ประมาณเวลา
+await job(1); await job(2) -> เวลารอรวมใกล้ 3 วินาที
+gather(job(1), job(2)) -> เวลารอใกล้ 2 วินาที เมื่อเป็นงานรออิสระ
+เวลาจริงยังมี overhead การจัดตาราง network และข้อจำกัดบริการ
+ใช้ time.perf_counter() วัดช่วงเวลา; time.time() ใช้เวลาแบบนาฬิกาปฏิทิน
+
+ตัวอย่างจาก repo
+Week1/coffee01_synchronous.py เทียบ coffee04_asyncio.py
+Week1/up01_synchronous.py เทียบ up02_thread.py, up03_multiprocess.py,
+up04_asyncio.py: สังเกต shared state และการรอ มากกว่าดูเวลารวมอย่างเดียว
+Week2/restaurant_01_*.py: ลำดับภายในลูกค้าแต่ละคนยังต้องถูกต้อง
+Week6/robots.py: reset โรงงานก่อน แล้วรัน workflow ของแต่ละ robot ร่วมกัน
+
+แนวตอบข้อเขียน
+"Async เหมาะกับงานที่รอ I/O เพราะ coroutine คืนการควบคุมระหว่างรอ
+event loop จึงเดินงานที่พร้อมต่อได้ Concurrency นี้ไม่รับประกัน Parallelism
+และจะเสียประโยชน์ถ้าใช้ blocking call บน thread ของ event loop"
+
+ข้อผิดพลาดที่พบบ่อย
+- ใช้ time.sleep() ใน async def -> บล็อก thread ที่เรียกมัน
+- เรียก coroutine แต่ไม่ await / schedule -> ยังไม่ทำงาน
+- งานสัมพันธ์กันแต่ gather พร้อมกัน -> ลำดับธุรกิจอาจผิด
+
+========================================================================
+อ่านละเอียด — คู่มือเดิมจาก Week1_UP1-4_Lab_Guide.md
+คำสั่งติดตั้ง/ส่ง request เป็นตัวอย่างสำหรับเตรียม lab ไม่ใช่สิ่งที่ได้รันในการตรวจหนังสือ
+endpoint และค่าห้องเรียนต้องตรวจใหม่ก่อนใช้งาน
+
+Week 1 UP1-4 Lab Guide
+======================
+
+คู่มือฉบับนี้เขียนไว้ให้ใบใช้ทำ Week1/up01_synchronous.py ถึง Week1/up04_asyncio.py
+โดยอ้างอิงจากสิ่งที่ไอริสช่วยทำในไฟล์ชุด pid01-04 และ ps01-04 ค่ะ
+
+เป้าหมาย: เข้าใจว่าแต่ละแบบทำงานต่างกันยังไง ก่อนเอา pattern ไปเขียน Lab up1-4
+
+----------------------------------------------------------------
+
+1. ภาพรวมไฟล์ใน Week1
+---------------------
+
+- ชุดไฟล์: pid01-04
+  หน้าที่: แสดง PID / Thread ID / Task ID
+  สิ่งที่เรียน: ดูว่า synchronous, thread, process, asyncio ใช้ตัวตนการทำงานต่างกันยังไง
+
+- ชุดไฟล์: ps01-04
+  หน้าที่: เพิ่มการวัด CPU Time และ RAM
+  สิ่งที่เรียน: ดู performance / resource ที่ใช้ในแต่ละวิธี
+
+- ชุดไฟล์: up01-04
+  หน้าที่: Lab ที่ใบต้องทำต่อ
+  สิ่งที่เรียน: เอาความรู้จาก pid + ps ไปเขียนเอง
+
+
+ไฟล์ up ตอนนี้มีฟังก์ชันหลัก 3 ตัว:
+
+[โค้ด / แผนภาพ : python]
+def update_cup_number(customer_name):
+    pass
+
+def make_coffee(customer_name):
+    pass
+
+def main():
+    pass
+[จบโค้ด / แผนภาพ]
+
+ส่วน up04_asyncio.py ใช้ async def:
+
+[โค้ด / แผนภาพ : python]
+async def update_cup_number(customer_name):
+    pass
+
+async def make_coffee(customer_name):
+    pass
+
+async def main():
+    pass
+[จบโค้ด / แผนภาพ]
+
+จากชื่อ update_cup_number() แนว Lab น่าจะให้ทดลองเรื่อง “ตัวแปรร่วม” เช่น เลขแก้วกาแฟ /
+counter เมื่อทำงานแบบ synchronous, thread, process, และ asyncio ค่ะ
+
+----------------------------------------------------------------
+
+2. Library ที่ใช้ และใช้ทำอะไร
+------------------------------
+
+2.1 time
+------------
+
+[โค้ด / แผนภาพ : python]
+from time import sleep, ctime, time, process_time
+[จบโค้ด / แผนภาพ]
+
+- ชื่อ: sleep(5)
+  ใช้ทำอะไร: หยุดรอแบบ blocking 5 วินาที
+  ตัวอย่าง: ใช้ใน synchronous/thread/process
+
+- ชื่อ: ctime()
+  ใช้ทำอะไร: แปลงเวลาปัจจุบันเป็นข้อความอ่านง่าย
+  ตัวอย่าง: Wed Jun 24 11:16:05 2026
+
+- ชื่อ: time()
+  ใช้ทำอะไร: จับเวลาจริงแบบ wall time
+  ตัวอย่าง: เวลาที่ผู้ใช้รอจริง
+
+- ชื่อ: process_time()
+  ใช้ทำอะไร: จับเวลาที่ CPU ใช้จริง
+  ตัวอย่าง: ไม่นับเวลานอน sleep() เป็นหลัก
+
+
+ใน pid ใช้ sleep, ctime, time
+ใน ps เพิ่ม process_time เพื่อดู CPU Time
+
+----------------------------------------------------------------
+
+2.2 os
+------------
+
+[โค้ด / แผนภาพ : python]
+import os
+[จบโค้ด / แผนภาพ]
+
+ใช้ดู Process ID ของโปรแกรม:
+
+[โค้ด / แผนภาพ : python]
+pid = os.getpid()
+[จบโค้ด / แผนภาพ]
+
+PID คือเลขประจำ process
+
+- Synchronous: ทุกงานอยู่ PID เดียว
+- Multi-thread: ทุก thread ยังอยู่ PID เดียวกัน
+- Multi-processing: แต่ละ process จะมี PID คนละเลข
+- Asyncio: ทุก task อยู่ PID เดียวกัน
+
+----------------------------------------------------------------
+
+2.3 threading
+-------------
+
+[โค้ด / แผนภาพ : python]
+import threading
+[จบโค้ด / แผนภาพ]
+
+ใช้ดูข้อมูล thread ปัจจุบัน:
+
+[โค้ด / แผนภาพ : python]
+thread_id = threading.current_thread().native_id
+thread_name = threading.current_thread().name
+[จบโค้ด / แผนภาพ]
+
+และใช้สร้าง Thread ใน pid02 / ps02:
+
+[โค้ด / แผนภาพ : python]
+t = threading.Thread(
+    target=make_coffee,
+    args=(customer,),
+    name=f"Thread-{customer}"
+)
+t.start()
+t.join()
+[จบโค้ด / แผนภาพ]
+
+คำสำคัญ:
+
+- คำสั่ง: Thread(...)
+  ความหมาย: สร้าง thread ใหม่
+
+- คำสั่ง: target=make_coffee
+  ความหมาย: ให้ thread ไปทำฟังก์ชันนี้
+
+- คำสั่ง: args=(customer,)
+  ความหมาย: ส่ง argument เข้า function ต้องมี comma เพราะเป็น tuple
+
+- คำสั่ง: name=...
+  ความหมาย: ตั้งชื่อ thread ให้อ่าน log ง่าย
+
+- คำสั่ง: start()
+  ความหมาย: เริ่มทำงานจริง
+
+- คำสั่ง: join()
+  ความหมาย: รอให้ thread ทำงานเสร็จก่อนค่อยไปต่อ
+
+
+----------------------------------------------------------------
+
+2.4 multiprocessing
+-------------------
+
+[โค้ด / แผนภาพ : python]
+import multiprocessing
+[จบโค้ด / แผนภาพ]
+
+ใช้สร้าง process แยกจริง ๆ:
+
+[โค้ด / แผนภาพ : python]
+p = multiprocessing.Process(
+    target=make_coffee,
+    args=(customer,)
+)
+p.start()
+p.join()
+[จบโค้ด / แผนภาพ]
+
+สิ่งสำคัญ: process แต่ละตัวมี memory แยกกัน ไม่แชร์ตัวแปรธรรมดากันโดยตรง
+
+ถ้าจะส่งข้อมูลจาก process ลูกกลับมาที่ process หลัก ใช้ multiprocessing.Queue():
+
+[โค้ด / แผนภาพ : python]
+result_queue = multiprocessing.Queue()
+result_queue.put((mem_mb, cpu_duration))
+mem, cpu_t = result_queue.get()
+[จบโค้ด / แผนภาพ]
+
+ไอริสใช้ pattern นี้ใน ps03_multiprocess.py เพื่อรวม RAM/CPU จาก process ย่อยค่ะ
+
+----------------------------------------------------------------
+
+2.5 asyncio
+------------
+
+[โค้ด / แผนภาพ : python]
+import asyncio
+[จบโค้ด / แผนภาพ]
+
+ใช้เขียน asynchronous programming แบบ event loop
+
+คำสำคัญ:
+
+- คำสั่ง: async def
+  ความหมาย: ประกาศ coroutine function
+
+- คำสั่ง: await
+  ความหมาย: ยอมคืน control ให้ event loop ระหว่างรอ
+
+- คำสั่ง: asyncio.sleep(5)
+  ความหมาย: รอแบบ non-blocking
+
+- คำสั่ง: asyncio.create_task(...)
+  ความหมาย: แปลง coroutine เป็น task ที่ event loop จัดการ
+
+- คำสั่ง: asyncio.gather(*tasks)
+  ความหมาย: รอหลาย task พร้อมกัน
+
+- คำสั่ง: asyncio.run(main())
+  ความหมาย: เริ่ม event loop
+
+
+ตัวอย่างจาก pid04 / ps04:
+
+[โค้ด / แผนภาพ : python]
+coro = make_coffee(customer)
+task = asyncio.create_task(coro, name=f"Task-{customer}")
+tasks.append(task)
+await asyncio.gather(*tasks)
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+2.6 psutil
+------------
+
+[โค้ด / แผนภาพ : python]
+import psutil
+[จบโค้ด / แผนภาพ]
+
+ใช้ดูการใช้ RAM ของ process:
+
+[โค้ด / แผนภาพ : python]
+process = psutil.Process(os.getpid())
+mem_mb = process.memory_info().rss / (1024 * 1024)
+[จบโค้ด / แผนภาพ]
+
+- ส่วน: psutil.Process(pid)
+  ความหมาย: เลือก process ที่ต้องการดู
+
+- ส่วน: memory_info().rss
+  ความหมาย: RAM ที่ process ใช้อยู่ หน่วย byte
+
+- ส่วน: / (1024 * 1024)
+  ความหมาย: แปลง byte เป็น MB
+
+
+ถ้ารันแล้วเจอ error:
+
+[โค้ด / แผนภาพ : text]
+ModuleNotFoundError: No module named 'psutil'
+[จบโค้ด / แผนภาพ]
+
+ให้ติดตั้งก่อน:
+
+[โค้ด / แผนภาพ : bash]
+pip install psutil
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+3. ไอริสทำอะไรในชุด pid01-04
+----------------------------
+
+ชุด pid มีหน้าที่หลักคือ “ดูตัวตนของงานที่กำลังรัน” ได้แก่ PID, Thread ID, Thread Name,
+และ Async Task ID
+
+----------------------------------------------------------------
+
+3.1 pid01_synchronous.py
+------------------------
+
+แนวคิด: ทำทีละคนตามคิว
+
+สิ่งที่ไอริสเขียน:
+
+[โค้ด / แผนภาพ : python]
+queue = ['A', 'B', 'C']
+for customer in queue:
+    make_coffee(customer)
+[จบโค้ด / แผนภาพ]
+
+ผลที่ควรเข้าใจ:
+
+- ลูกค้า A เสร็จก่อน แล้วค่อย B แล้วค่อย C
+- ใช้ thread เดียวคือ MainThread
+- ใช้ PID เดียวและ TID เดียว
+- ถ้าแต่ละคน sleep(5) รวม 3 คน จะใช้เวลาประมาณ 15 วินาที
+
+ตัวแปรสำคัญ:
+
+- ตัวแปร: queue
+  ความหมาย: รายชื่อลูกค้าในคิว
+
+- ตัวแปร: pid
+  ความหมาย: Process ID ของโปรแกรม
+
+- ตัวแปร: thread_id
+  ความหมาย: Thread ID ปัจจุบัน
+
+- ตัวแปร: thread_name
+  ความหมาย: ชื่อ Thread ปัจจุบัน
+
+- ตัวแปร: start_time
+  ความหมาย: เวลาเริ่มต้น
+
+- ตัวแปร: duration
+  ความหมาย: เวลารวมที่ใช้จริง
+
+
+----------------------------------------------------------------
+
+3.2 pid02_thread.py
+-------------------
+
+แนวคิด: สร้าง thread 1 ตัวต่อลูกค้า 1 คน
+
+สิ่งที่ไอริสเขียน:
+
+[โค้ด / แผนภาพ : python]
+threads = []
+for customer in queue:
+    t = threading.Thread(target=make_coffee, args=(customer,), name=f"Thread-{customer}")
+    threads.append(t)
+    t.start()
+
+for t in threads:
+    t.join()
+[จบโค้ด / แผนภาพ]
+
+ผลที่ควรเข้าใจ:
+
+- A, B, C เริ่มชงใกล้ ๆ กัน
+- PID เหมือนกัน เพราะยังอยู่ process เดียว
+- TID ต่างกัน เพราะเป็นคนละ thread
+- เวลารวมประมาณ 5 วินาที เพราะรอพร้อมกัน
+
+ข้อควรระวังสำหรับ Lab up02:
+
+ถ้ามีตัวแปรร่วม เช่น cup_number หลาย thread อาจแก้พร้อมกันจนค่าเพี้ยนได้ เรียกว่า race
+condition ค่ะ
+
+ถ้าต้องกันค่าเพี้ยน ใช้ threading.Lock():
+
+[โค้ด / แผนภาพ : python]
+lock = threading.Lock()
+
+with lock:
+    cup_number += 1
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+3.3 pid03_multiprocess.py
+-------------------------
+
+แนวคิด: สร้าง process 1 ตัวต่อลูกค้า 1 คน
+
+สิ่งที่ไอริสเขียน:
+
+[โค้ด / แผนภาพ : python]
+processes = []
+for customer in queue:
+    p = multiprocessing.Process(target=make_coffee, args=(customer,))
+    processes.append(p)
+    p.start()
+
+for p in processes:
+    p.join()
+[จบโค้ด / แผนภาพ]
+
+ผลที่ควรเข้าใจ:
+
+- A, B, C ทำงานพร้อมกันใน process แยก
+- PID ต่างกัน เพราะเป็นคนละ process
+- Thread Name มักเป็น MainThread ในแต่ละ process
+- เวลารวมประมาณ 5 วินาที
+
+ข้อควรระวังสำหรับ Lab up03:
+
+ตัวแปรธรรมดาไม่แชร์กันระหว่าง process เช่น ถ้ามี:
+
+[โค้ด / แผนภาพ : python]
+cup_number = 0
+[จบโค้ด / แผนภาพ]
+
+แล้ว process ลูกแต่ละตัวเพิ่มค่าเอง ค่าใน main process จะไม่เปลี่ยนตามโดยอัตโนมัติ
+
+ถ้าต้องส่งค่ากลับ main process ใช้:
+
+- multiprocessing.Queue()
+- multiprocessing.Value()
+- multiprocessing.Manager()
+
+----------------------------------------------------------------
+
+3.4 pid04_asyncio.py
+--------------------
+
+แนวคิด: ใช้ task หลายตัวใน thread เดียว process เดียว แต่สลับงานระหว่างรอ
+
+สิ่งที่ไอริสเขียน:
+
+[โค้ด / แผนภาพ : python]
+tasks = []
+for customer in queue:
+    coro = make_coffee(customer)
+    task = asyncio.create_task(coro, name=f"Task-{customer}")
+    tasks.append(task)
+
+await asyncio.gather(*tasks)
+[จบโค้ด / แผนภาพ]
+
+ใน make_coffee() ใช้:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.sleep(5)
+[จบโค้ด / แผนภาพ]
+
+ผลที่ควรเข้าใจ:
+
+- PID เดียวกัน
+- TID เดียวกัน
+- Task ID ต่างกัน
+- เหมาะกับงานรอ เช่น network, file, sleep, API
+- ถ้าใช้ await asyncio.sleep(5) หลาย task จะรอพร้อมกันได้ ใช้เวลาประมาณ 5 วินาที
+
+----------------------------------------------------------------
+
+4. ไอริสทำอะไรในชุด ps01-04
+---------------------------
+
+ชุด ps คือเอา logic จาก pid มาเพิ่มการวัด performance:
+
+1. วัดเวลาจริงด้วย time()
+2. วัด CPU Time ด้วย process_time()
+3. วัด RAM ด้วย psutil
+4. เพิ่มงานจำลอง CPU-bound ด้วย sum(i * i for i in range(1000000))
+
+----------------------------------------------------------------
+
+4.1 ตัวแปรที่เพิ่มใน ps
+-----------------------
+
+- ตัวแปร: start_cpu
+  ใช้ทำอะไร: เวลา CPU ตอนเริ่ม
+
+- ตัวแปร: cpu_duration
+  ใช้ทำอะไร: เวลา CPU ที่ใช้จริง
+
+- ตัวแปร: process
+  ใช้ทำอะไร: object ของ process ปัจจุบันจาก psutil
+
+- ตัวแปร: mem_mb
+  ใช้ทำอะไร: RAM ที่ใช้ หน่วย MB
+
+- ตัวแปร: main_mem
+  ใช้ทำอะไร: RAM ของ main process
+
+- ตัวแปร: child_memories
+  ใช้ทำอะไร: RAM ของ process ลูกทั้งหมด
+
+- ตัวแปร: child_cpu_times
+  ใช้ทำอะไร: CPU Time ของ process ลูกทั้งหมด
+
+- ตัวแปร: total_memory
+  ใช้ทำอะไร: RAM รวม main + ลูก
+
+- ตัวแปร: total_cpu_time
+  ใช้ทำอะไร: CPU Time รวม main + ลูก
+
+
+----------------------------------------------------------------
+
+4.2 ทำไมต้องมี sum(i * i for i in range(1000000))
+-------------------------------------------------
+
+บรรทัดนี้จำลองงานคำนวณเล็ก ๆ:
+
+[โค้ด / แผนภาพ : python]
+sum(i * i for i in range(1000000))
+[จบโค้ด / แผนภาพ]
+
+เหตุผล:
+
+- ถ้ามีแต่ sleep(5) โปรแกรมแทบไม่ได้ใช้ CPU
+- พอใส่ sum(...) จะเห็น CPU Time เพิ่มขึ้นบ้าง
+- ช่วยแยกความต่างระหว่าง “เวลาที่รอจริง” กับ “เวลาที่ CPU ทำงานจริง”
+
+----------------------------------------------------------------
+
+4.3 ต่างกันยังไงระหว่าง Wall Time กับ CPU Time
+----------------------------------------------
+
+- เวลา: Wall Time
+  ความหมาย: เวลาที่คนรอจริงตั้งแต่เริ่มถึงจบ
+  ตัวอย่าง: Synchronous 3 คน × 5 วิ = ประมาณ 15 วิ
+
+- เวลา: CPU Time
+  ความหมาย: เวลาที่ CPU ใช้คิดจริง
+  ตัวอย่าง: อาจน้อยกว่า wall time มาก เพราะ sleep() ไม่ได้ใช้ CPU
+
+
+ตัวอย่าง:
+
+[โค้ด / แผนภาพ : python]
+start_time = time()
+start_cpu = process_time()
+
+# ทำงาน
+
+duration = time() - start_time
+cpu_duration = process_time() - start_cpu
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+5. เอาไปใช้กับ Lab up01-04 ยังไง
+--------------------------------
+
+จากไฟล์ up มีฟังก์ชันเพิ่มมาอีกตัวคือ:
+
+[โค้ด / แผนภาพ : python]
+def update_cup_number(customer_name):
+    pass
+[จบโค้ด / แผนภาพ]
+
+ให้คิดว่า function นี้น่าจะรับผิดชอบ “อัปเดตเลขแก้ว / counter” ให้ลูกค้าแต่ละคน เช่น:
+
+[โค้ด / แผนภาพ : text]
+ลูกค้า A ได้แก้วหมายเลข 1
+ลูกค้า B ได้แก้วหมายเลข 2
+ลูกค้า C ได้แก้วหมายเลข 3
+[จบโค้ด / แผนภาพ]
+
+โครงคิดพื้นฐาน:
+
+[โค้ด / แผนภาพ : python]
+cup_number = 0
+
+def update_cup_number(customer_name):
+    global cup_number
+    cup_number += 1
+    print(f"ลูกค้า {customer_name} ได้แก้วหมายเลข {cup_number}")
+[จบโค้ด / แผนภาพ]
+
+แต่ต้องระวังว่าแต่ละรูปแบบมีปัญหาไม่เหมือนกันค่ะ
+
+----------------------------------------------------------------
+
+6. แนวทางทำ up01_synchronous.py
+-------------------------------
+
+เป้าหมาย
+------------
+
+ทำทีละคนตามลำดับ ไม่มีงานพร้อมกัน
+
+Pattern จาก pid01
+-----------------
+
+[โค้ด / แผนภาพ : python]
+for customer in queue:
+    make_coffee(customer)
+[จบโค้ด / แผนภาพ]
+
+วิธีคิดสำหรับ up01
+------------------
+
+1. สร้างตัวแปร global เช่น cup_number = 0
+2. ใน update_cup_number() เพิ่มเลขแก้วทีละ 1
+3. ใน make_coffee() เรียก update_cup_number(customer_name) แล้วจำลองชงกาแฟด้วย sleep(5)
+4. ใน main() loop ลูกค้า A, B, C ทีละคน
+
+สิ่งที่ควรเห็น
+--------------
+
+- เลขแก้วควรเรียง 1, 2, 3 เสมอ
+- เวลารวมประมาณ 15 วินาที
+- ไม่มี race condition เพราะทำทีละคน
+
+----------------------------------------------------------------
+
+7. แนวทางทำ up02_thread.py
+--------------------------
+
+เป้าหมาย
+------------
+
+ทำพร้อมกันด้วย Thread
+
+Pattern จาก pid02
+-----------------
+
+[โค้ด / แผนภาพ : python]
+threads = []
+for customer in queue:
+    t = threading.Thread(target=make_coffee, args=(customer,), name=f"Thread-{customer}")
+    threads.append(t)
+    t.start()
+
+for t in threads:
+    t.join()
+[จบโค้ด / แผนภาพ]
+
+จุดที่ต้องระวัง
+---------------
+
+ถ้า update_cup_number() แก้ cup_number พร้อมกันหลาย thread อาจเกิด race condition
+
+ตัวอย่างปัญหา:
+
+[โค้ด / แผนภาพ : python]
+old = cup_number
+sleep(0.1)
+cup_number = old + 1
+[จบโค้ด / แผนภาพ]
+
+ถ้าหลาย thread อ่านค่าเก่าพร้อมกัน อาจได้เลขซ้ำ
+
+วิธีแก้ถ้าต้องการให้เลขถูก
+--------------------------
+
+ใช้ lock:
+
+[โค้ด / แผนภาพ : python]
+lock = threading.Lock()
+
+with lock:
+    cup_number += 1
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่ควรเห็น
+--------------
+
+- เวลาโดยรวมประมาณ 5 วินาที
+- ถ้าไม่ใช้ lock อาจเห็นเลขแก้วเพี้ยน/ซ้ำในบางรอบ
+- ถ้าใช้ lock เลขแก้วควรถูกต้องขึ้น
+
+----------------------------------------------------------------
+
+8. แนวทางทำ up03_multiprocess.py
+--------------------------------
+
+เป้าหมาย
+------------
+
+ทำพร้อมกันด้วย Process
+
+Pattern จาก pid03
+-----------------
+
+[โค้ด / แผนภาพ : python]
+processes = []
+for customer in queue:
+    p = multiprocessing.Process(target=make_coffee, args=(customer,))
+    processes.append(p)
+    p.start()
+
+for p in processes:
+    p.join()
+[จบโค้ด / แผนภาพ]
+
+จุดที่ต้องระวังมากที่สุด
+------------------------
+
+Process ไม่แชร์ memory ธรรมดากัน
+
+ถ้าเขียนแบบนี้:
+
+[โค้ด / แผนภาพ : python]
+cup_number = 0
+[จบโค้ด / แผนภาพ]
+
+แต่ละ process จะมี cup_number เป็นของตัวเอง ทำให้ main process ไม่รู้ว่าลูกทำอะไรไปแล้ว
+
+วิธีแชร์ข้อมูลระหว่าง process
+-----------------------------
+
+เลือกใช้ได้ตามโจทย์:
+
+- วิธี: multiprocessing.Queue()
+  ใช้เมื่อไหร่: ส่งผลลัพธ์จาก process ลูกกลับ main
+
+- วิธี: multiprocessing.Value()
+  ใช้เมื่อไหร่: แชร์ค่าตัวเลขเดียว เช่น counter
+
+- วิธี: multiprocessing.Manager().dict/list()
+  ใช้เมื่อไหร่: แชร์ dict/list
+
+
+ตัวอย่าง Queue:
+
+[โค้ด / แผนภาพ : python]
+result_queue = multiprocessing.Queue()
+
+p = multiprocessing.Process(target=make_coffee, args=(customer, result_queue))
+
+# ใน process ลูก
+result_queue.put((customer_name, cup_no))
+
+# ใน main process
+customer_name, cup_no = result_queue.get()
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่ควรเห็น
+--------------
+
+- PID ของลูกค้าแต่ละคนต่างกัน
+- เวลารวมประมาณ 5 วินาที
+- ถ้าต้องรวมผลลัพธ์ ต้องส่งกลับมาผ่าน Queue หรือ shared object
+
+----------------------------------------------------------------
+
+9. แนวทางทำ up04_asyncio.py
+---------------------------
+
+เป้าหมาย
+------------
+
+ทำพร้อมกันแบบ async task ใน process/thread เดียว
+
+สิ่งที่ไฟล์ up04 ต้องมีเพิ่ม
+----------------------------
+
+ตอนนี้ up04_asyncio.py ยังไม่มี import ในไฟล์ตั้งต้น ดังนั้นควรมีอย่างน้อย:
+
+[โค้ด / แผนภาพ : python]
+from time import ctime, time
+import asyncio
+[จบโค้ด / แผนภาพ]
+
+ถ้าจะดู PID/TID แบบ pid04 ให้เพิ่ม:
+
+[โค้ด / แผนภาพ : python]
+import os
+import threading
+[จบโค้ด / แผนภาพ]
+
+Pattern จาก pid04
+-----------------
+
+[โค้ด / แผนภาพ : python]
+tasks = []
+for customer in queue:
+    coro = make_coffee(customer)
+    task = asyncio.create_task(coro, name=f"Task-{customer}")
+    tasks.append(task)
+
+await asyncio.gather(*tasks)
+[จบโค้ด / แผนภาพ]
+
+ใน async function ใช้:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.sleep(5)
+[จบโค้ด / แผนภาพ]
+
+ห้ามใช้ sleep(5) ธรรมดาใน async function ถ้าอยากให้ task สลับกันได้ เพราะ sleep(5) จะ
+block event loop
+
+ถ้ามี update_cup_number() แบบ async
+-----------------------------------
+
+[โค้ด / แผนภาพ : python]
+async def update_cup_number(customer_name):
+    global cup_number
+    cup_number += 1
+    print(f"ลูกค้า {customer_name} ได้แก้วหมายเลข {cup_number}")
+[จบโค้ด / แผนภาพ]
+
+ถ้าต้องป้องกันช่วง critical section ใน asyncio ใช้:
+
+[โค้ด / แผนภาพ : python]
+lock = asyncio.Lock()
+
+async with lock:
+    cup_number += 1
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่ควรเห็น
+--------------
+
+- PID เดียวกัน
+- TID เดียวกัน
+- Task Name ต่างกัน เช่น Task-A, Task-B, Task-C
+- เวลารวมประมาณ 5 วินาที ถ้าใช้ await asyncio.sleep(5)
+
+----------------------------------------------------------------
+
+10. ตารางเปรียบเทียบ 4 วิธี
+---------------------------
+
+- วิธี: Synchronous
+  ทำพร้อมกันไหม: ไม่พร้อมกัน
+  PID: เดียว
+  Thread ID: เดียว
+  เหมาะกับงานแบบไหน: งานง่าย/ทำทีละขั้น
+  เวลาประมาณในตัวอย่าง: 15 วิ
+
+- วิธี: Multi-Thread
+  ทำพร้อมกันไหม: พร้อมกัน
+  PID: เดียว
+  Thread ID: หลาย TID
+  เหมาะกับงานแบบไหน: งานรอ I/O เช่น sleep/network
+  เวลาประมาณในตัวอย่าง: 5 วิ
+
+- วิธี: Multi-processing
+  ทำพร้อมกันไหม: พร้อมกัน
+  PID: หลาย PID
+  Thread ID: แต่ละ process มี MainThread
+  เหมาะกับงานแบบไหน: งาน CPU หนัก
+  เวลาประมาณในตัวอย่าง: 5 วิ
+
+- วิธี: Asyncio
+  ทำพร้อมกันไหม: พร้อมกันแบบสลับ task
+  PID: เดียว
+  Thread ID: เดียว
+  เหมาะกับงานแบบไหน: งาน I/O / wait เยอะ
+  เวลาประมาณในตัวอย่าง: 5 วิ
+
+
+----------------------------------------------------------------
+
+11. Checklist ก่อนทำ Lab UP1-4
+------------------------------
+
+ก่อนเขียน
+------------
+
+- [ ] เข้าใจว่า queue = ['A', 'B', 'C'] คือรายชื่อลูกค้า
+- [ ] เข้าใจว่า make_coffee() คือการจำลองงานหลัก
+- [ ] เข้าใจว่า update_cup_number() คือจุดอัปเดตเลขแก้ว / counter
+- [ ] เลือกวิธีรันให้ตรงไฟล์: sync, thread, process, asyncio
+
+หลังเขียน
+------------
+
+- [ ] รันไฟล์แล้วไม่มี error
+- [ ] มี output บอกเวลาเริ่ม/จบ
+- [ ] เห็นความต่างของเวลารวม
+- [ ] ถ้าเป็น thread/process/async เห็นว่างานเริ่มใกล้กัน
+- [ ] ถ้ามีเลขแก้ว ตรวจว่าเลขซ้ำไหม / เรียงไหม
+
+----------------------------------------------------------------
+
+12. คำสั่งรันแต่ละไฟล์
+----------------------
+
+จาก root project:
+
+[โค้ด / แผนภาพ : bash]
+python3 Week1/up01_synchronous.py
+python3 Week1/up02_thread.py
+python3 Week1/up03_multiprocess.py
+python3 Week1/up04_asyncio.py
+[จบโค้ด / แผนภาพ]
+
+ตรวจ syntax ก่อนส่ง:
+
+[โค้ด / แผนภาพ : bash]
+python3 -m py_compile Week1/up01_synchronous.py Week1/up02_thread.py Week1/up03_multiprocess.py Week1/up04_asyncio.py
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+13. สรุปสั้น ๆ สำหรับใบ
+-----------------------
+
+ถ้าจำได้แค่นี้พอค่ะ:
+
+1. pid = ดูว่าใครทำงานอยู่ เช่น PID, TID, Task ID
+2. ps = ดู performance เช่น Wall Time, CPU Time, RAM
+3. up = เอา pattern ไปทำ Lab ด้วยฟังก์ชัน update_cup_number()
+4. Synchronous ทำทีละคน จึงช้าแต่เข้าใจง่าย
+5. Thread ทำพร้อมกันใน process เดียว แต่ต้องระวังตัวแปรร่วม
+6. Process ทำพร้อมกันแบบแยก memory ต้องใช้ Queue/Value/Manager ถ้าจะแชร์ข้อมูล
+7. Asyncio ทำพร้อมกันแบบสลับ task ต้องใช้ await และ asyncio.sleep()
+
+----------------------------------------------------------------
+
+14. แผนทำ UP1-4 แบบปลอดภัย
+--------------------------
+
+แนะนำให้ใบทำตามลำดับนี้:
+
+1. ทำ up01_synchronous.py ให้ผ่านก่อน เพราะง่ายสุด
+2. คัด logic หลักไป up02_thread.py แล้วเปลี่ยน loop เป็น Thread
+3. ทดลองว่าถ้ามีตัวแปรร่วมเกิดปัญหาไหม แล้วค่อยเพิ่ม Lock ถ้าโจทย์ต้องการความถูกต้อง
+4. ทำ up03_multiprocess.py โดยจำไว้ว่า process ไม่แชร์ตัวแปรธรรมดา
+5. ทำ up04_asyncio.py โดยเปลี่ยน sleep() เป็น await asyncio.sleep()
+6. รันทุกไฟล์และจดผลเวลาเปรียบเทียบ
+
+ถ้าติดตอนทำ Lab ให้เปิดคู่มือนี้คู่กับไฟล์ pid และ ps ได้เลยค่ะ
+
+========================================================================
+อ่านละเอียด — คู่มือเดิมจาก Week2_Restaurant_01_Code_Study_Guide.md
+คำสั่งติดตั้ง/ส่ง request เป็นตัวอย่างสำหรับเตรียม lab ไม่ใช่สิ่งที่ได้รันในการตรวจหนังสือ
+endpoint และค่าห้องเรียนต้องตรวจใหม่ก่อนใช้งาน
+
+Week 2 Restaurant 01 Code Study Guide
+=====================================
+
+คู่มือนี้เขียนจากโค้ดจริงล่าสุดในไฟล์ร้านอาหารทั้ง 4 ไฟล์ของใบค่ะ:
+
+- Week2/restaurant_01_simple.py
+- Week2/restaurant_01_thread.py
+- Week2/restaurant_01_multiprocess.py
+- Week2/restaurant_01_asyncio.py
+
+เป้าหมาย: ให้ใบอ่านแล้วเข้าใจว่าโค้ดแต่ละไฟล์ทำอะไร ทำไม output ถึงเป็นแบบนั้น
+และต่างกันตรงไหนระหว่าง simple, thread, multiprocess, และ asyncio
+
+----------------------------------------------------------------
+
+1. ภาพรวมโจทย์ร้านอาหาร
+-----------------------
+
+โค้ดทั้ง 4 ไฟล์จำลอง workflow ของร้านอาหารสำหรับลูกค้า 3 คน:
+
+[โค้ด / แผนภาพ : python]
+customers = ["A", "B", "C"]
+[จบโค้ด / แผนภาพ]
+
+แต่ละลูกค้าต้องผ่านงานประมาณนี้:
+
+1. Greeting — ทักทายลูกค้า
+2. Taking Order — รับออเดอร์
+3. Cooking หรือ Cooking Spaghetti — ทำอาหาร
+4. Mini bar หรือ Manage bar for Drink — จัดเครื่องดื่ม
+
+ในทุกไฟล์ใช้เวลา 1 วินาที ต่อหนึ่งขั้นตอน ด้วย sleep(1) หรือ await asyncio.sleep(1)
+
+----------------------------------------------------------------
+
+2. แนวคิดสำคัญของ Lab นี้
+-------------------------
+
+สิ่งที่อาจารย์ต้องการให้เห็นไม่ใช่แค่ print output แต่คือ รูปแบบการจัดงาน ค่ะ
+
+- ไฟล์: restaurant_01_simple.py
+  วิธีคิด: ทำทีละลูกค้าแบบปกติ
+  Greeting: เรียง A -> B -> C
+  งานหลัง Greeting: เรียง A -> B -> C
+  เวลารวมโดยประมาณ: ~12 วิ
+
+- ไฟล์: restaurant_01_thread.py
+  วิธีคิด: แยก thread ให้ลูกค้าแต่ละคน
+  Greeting: เรียง A -> B -> C
+  งานหลัง Greeting: A/B/C ทำพร้อมกันด้วย thread
+  เวลารวมโดยประมาณ: ~6 วิ
+
+- ไฟล์: restaurant_01_multiprocess.py
+  วิธีคิด: แยก process ให้ลูกค้าแต่ละคน
+  Greeting: เรียง A -> B -> C
+  งานหลัง Greeting: A/B/C ทำพร้อมกันด้วย process
+  เวลารวมโดยประมาณ: ~6-8 วิ
+
+- ไฟล์: restaurant_01_asyncio.py
+  วิธีคิด: แยก async task ให้ลูกค้าแต่ละคน
+  Greeting: เรียง A -> B -> C
+  งานหลัง Greeting: A/B/C สลับกันทำผ่าน event loop
+  เวลารวมโดยประมาณ: ~6 วิ
+
+
+ทำไม simple ถึง ~12 วิ?
+
+- Greeting 3 คน × 1 วิ = 3 วิ
+- แต่ละลูกค้าหลัง greeting มี 3 งาน × 1 วิ = 3 วิ
+- ลูกค้า 3 คน × 3 วิ = 9 วิ
+- รวม 3 + 9 = 12 วิ
+
+ทำไม thread/process/asyncio ถึง ~6 วิ?
+
+- Greeting ยังเรียงกันอยู่ = 3 วิ
+- งานหลัง greeting ของ A/B/C ทำพร้อมกันหรือสลับกัน = ประมาณ 3 วิ
+- รวม 3 + 3 = 6 วิ
+
+----------------------------------------------------------------
+
+3. คำศัพท์ที่ต้องเข้าใจก่อนอ่านโค้ด
+-----------------------------------
+
+- คำ: sequential
+  ความหมายง่าย ๆ: ทำทีละขั้น เรียงกัน
+  ใน Lab นี้คือ: simple version
+
+- คำ: concurrent
+  ความหมายง่าย ๆ: หลายงานคืบหน้าในช่วงเวลาเดียวกัน
+  ใน Lab นี้คือ: thread/process/asyncio version
+
+- คำ: blocking
+  ความหมายง่าย ๆ: รอแล้วหยุดการทำงานตรงนั้น
+  ใน Lab นี้คือ: sleep(1)
+
+- คำ: non-blocking
+  ความหมายง่าย ๆ: รอแล้วให้ระบบไปทำงานอื่นก่อนได้
+  ใน Lab นี้คือ: await asyncio.sleep(1)
+
+- คำ: thread
+  ความหมายง่าย ๆ: เส้นทางการทำงานย่อยใน process เดียว
+  ใน Lab นี้คือ: threading.Thread(...)
+
+- คำ: process
+  ความหมายง่าย ๆ: โปรแกรมย่อยแยก memory กัน
+  ใน Lab นี้คือ: multiprocessing.Process(...)
+
+- คำ: coroutine
+  ความหมายง่าย ๆ: function แบบ async ที่ await ได้
+  ใน Lab นี้คือ: async def ...
+
+- คำ: task
+  ความหมายง่าย ๆ: coroutine ที่ถูกส่งให้ event loop จัดการ
+  ใน Lab นี้คือ: asyncio.create_task(...)
+
+- คำ: join
+  ความหมายง่าย ๆ: รอ thread/process ให้ทำงานเสร็จ
+  ใน Lab นี้คือ: t.join() / p.join()
+
+- คำ: await
+  ความหมายง่าย ๆ: รอ async operation ให้เสร็จ
+  ใน Lab นี้คือ: await task
+
+
+----------------------------------------------------------------
+
+4. Common Pattern ที่ทั้ง 4 ไฟล์ใช้เหมือนกัน
+--------------------------------------------
+
+4.1 มีลูกค้า 3 คน
+-----------------
+
+[โค้ด / แผนภาพ : python]
+customers = ["A", "B", "C"]
+[จบโค้ด / แผนภาพ]
+
+ตรงนี้คือ list ที่ใช้ loop สร้างงานให้ลูกค้าแต่ละคน
+
+----------------------------------------------------------------
+
+4.2 จับเวลารวม
+--------------
+
+[โค้ด / แผนภาพ : python]
+start_time = time()
+[จบโค้ด / แผนภาพ]
+
+ตอนท้ายจะเอาเวลาปัจจุบันลบเวลาเริ่ม:
+
+[โค้ด / แผนภาพ : python]
+print(f"Total Operation time: {time() - start_time:.2f} seconds")
+[จบโค้ด / แผนภาพ]
+
+หรือใน simple version:
+
+[โค้ด / แผนภาพ : python]
+print(f"{ctime()} Finished Entire Restaurant Operation in {time() - start_time:.2f} seconds.")
+[จบโค้ด / แผนภาพ]
+
+:.2f หมายถึงแสดงทศนิยม 2 ตำแหน่ง เช่น 6.01
+
+----------------------------------------------------------------
+
+4.3 ใช้ ctime() ทำ timestamp
+----------------------------
+
+[โค้ด / แผนภาพ : python]
+from time import ctime
+
+print(f"{ctime()} -> Greeting for customer-A ...")
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่าง output:
+
+[โค้ด / แผนภาพ : text]
+Wed Jul  1 11:34:46 2026 -> Greeting for customer-A ...
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+5. File 1 — restaurant_01_simple.py
+-----------------------------------
+
+5.1 หน้าที่ของไฟล์นี้
+---------------------
+
+ไฟล์นี้เป็น version พื้นฐานที่สุด ทำงานแบบ sequential คือทำทีละขั้น ไม่ได้แยก
+thread/process/task
+
+flow คือ:
+
+[โค้ด / แผนภาพ : text]
+Greeting A
+Greeting B
+Greeting C
+Serve A ทั้งหมด
+Serve B ทั้งหมด
+Serve C ทั้งหมด
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+5.2 Library ที่ใช้
+------------------
+
+[โค้ด / แผนภาพ : python]
+from time import sleep, ctime, time
+[จบโค้ด / แผนภาพ]
+
+- ชื่อ: sleep(1)
+  ใช้ทำอะไร: จำลองงานที่ใช้เวลา 1 วินาที
+
+- ชื่อ: ctime()
+  ใช้ทำอะไร: แสดงเวลาปัจจุบัน
+
+- ชื่อ: time()
+  ใช้ทำอะไร: จับเวลารวม
+
+
+----------------------------------------------------------------
+
+5.3 Function สำคัญ
+------------------
+
+greet_diners(customer)
+----------------------
+
+ใช้ทักทายลูกค้า 1 คน:
+
+[โค้ด / แผนภาพ : python]
+def greet_diners(customer):
+    print(f"{ctime()} Greeting for Customer-{customer} ...")
+    sleep(1)
+    print(f"{ctime()} Greeting for Customer-{customer} ...Done!")
+[จบโค้ด / แผนภาพ]
+
+ถ้าเรียก:
+
+[โค้ด / แผนภาพ : python]
+greet_diners("A")
+[จบโค้ด / แผนภาพ]
+
+จะได้ประมาณ:
+
+[โค้ด / แผนภาพ : text]
+Greeting for Customer-A ...
+Greeting for Customer-A ...Done!
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+take_order(customer)
+--------------------
+
+รับออเดอร์ลูกค้า:
+
+[โค้ด / แผนภาพ : python]
+def take_order(customer):
+    print(f"{ctime()} [Customer-{customer}] Taking Order ...")
+    sleep(1)
+    print(f"{ctime()} [Customer-{customer}] Taking Order ...Done!")
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+do_cooking(customer)
+--------------------
+
+ทำอาหาร:
+
+[โค้ด / แผนภาพ : python]
+def do_cooking(customer):
+    print(f"{ctime()} [Customer-{customer}] Cooking Spaghetti ...")
+    sleep(1)
+    print(f"{ctime()} [Customer-{customer}] Cooking Spaghetti ...Done!")
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+mini_bar(customer)
+------------------
+
+จัดเครื่องดื่ม:
+
+[โค้ด / แผนภาพ : python]
+def mini_bar(customer):
+    print(f"{ctime()} [Customer-{customer}] Manage Bar for Drink ...")
+    sleep(1)
+    print(f"{ctime()} [Customer-{customer}] Manage Bar for Drink ...Done!")
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+serve_customer(customer)
+------------------------
+
+รวม 3 งานหลัง greeting ให้ลูกค้าหนึ่งคน:
+
+[โค้ด / แผนภาพ : python]
+def serve_customer(customer):
+    take_order(customer)
+    do_cooking(customer)
+    mini_bar(customer)
+    print(f"{ctime()} [Customer-{customer}] All served!")
+    print()
+[จบโค้ด / แผนภาพ]
+
+แปลว่า ลูกค้าแต่ละคนต้อง:
+
+[โค้ด / แผนภาพ : text]
+Taking Order -> Cooking Spaghetti -> Manage Bar for Drink -> All served
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+5.4 main() ทำอะไร
+-----------------
+
+[โค้ด / แผนภาพ : python]
+def main():
+    customers = ["A", "B", "C"]
+    start_time = time()
+
+    for customer in customers:
+        greet_diners(customer)
+
+    print()
+    print(f"{ctime()} --- All customers greeted. Serving customers one by one! ---")
+    print()
+
+    for customer in customers:
+        serve_customer(customer)
+[จบโค้ด / แผนภาพ]
+
+แปลเป็นภาษาคน:
+
+1. ตั้งรายชื่อลูกค้า A, B, C
+2. จับเวลาเริ่ม
+3. greeting ลูกค้าทุกคนแบบเรียงกัน
+4. print ข้อความบอกว่า greeting ครบแล้ว
+5. serve ลูกค้าทีละคนแบบเรียงกัน
+
+----------------------------------------------------------------
+
+5.5 Example output ที่ควรเข้าใจ
+-------------------------------
+
+[โค้ด / แผนภาพ : text]
+Greeting for Customer-A ...
+Greeting for Customer-A ...Done!
+Greeting for Customer-B ...
+Greeting for Customer-B ...Done!
+Greeting for Customer-C ...
+Greeting for Customer-C ...Done!
+
+--- All customers greeted. Serving customers one by one! ---
+
+[Customer-A] Taking Order ...
+[Customer-A] Taking Order ...Done!
+[Customer-A] Cooking Spaghetti ...
+[Customer-A] Cooking Spaghetti ...Done!
+[Customer-A] Manage Bar for Drink ...
+[Customer-A] Manage Bar for Drink ...Done!
+[Customer-A] All served!
+[จบโค้ด / แผนภาพ]
+
+จุดสังเกต: ลูกค้า B จะยังไม่เริ่ม service จนกว่า A จะ All served!
+
+----------------------------------------------------------------
+
+5.6 Lab สำหรับ restaurant_01_simple.py
+--------------------------------------
+
+ลองแก้จำนวนลูกค้า:
+
+[โค้ด / แผนภาพ : python]
+customers = ["A", "B", "C", "D"]
+[จบโค้ด / แผนภาพ]
+
+คำถาม:
+
+1. เวลารวมควรเพิ่มจากประมาณ 12 วิเป็นกี่วิ?
+2. ลูกค้า D เริ่ม service ก่อน C เสร็จได้ไหม?
+3. ถ้าเพิ่ม sleep(2) ทุกจุด เวลาจะเพิ่มอย่างไร?
+
+เฉลยแนวคิด:
+
+- Greeting 4 คน × 1 = 4 วิ
+- Service 4 คน × 3 งาน × 1 = 12 วิ
+- รวมประมาณ 16 วิ
+
+----------------------------------------------------------------
+
+6. File 2 — restaurant_01_thread.py
+-----------------------------------
+
+6.1 หน้าที่ของไฟล์นี้
+---------------------
+
+ไฟล์นี้ใช้ threading เพื่อให้ลูกค้า A, B, C ทำ workflow หลัง greeting ได้พร้อมกันมากขึ้น
+
+flow คือ:
+
+[โค้ด / แผนภาพ : text]
+Greeting A
+Greeting B
+Greeting C
+สร้าง Thread-A, Thread-B, Thread-C
+Thread-A ทำงานของ A
+Thread-B ทำงานของ B
+Thread-C ทำงานของ C
+main รอทุก thread ด้วย join()
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+6.2 Library ที่ใช้
+------------------
+
+[โค้ด / แผนภาพ : python]
+from time import sleep, ctime, time
+import threading
+[จบโค้ด / แผนภาพ]
+
+- ชื่อ: threading.Thread(...)
+  ใช้ทำอะไร: สร้าง thread ใหม่
+
+- ชื่อ: t.start()
+  ใช้ทำอะไร: เริ่มให้ thread ทำงาน
+
+- ชื่อ: t.join()
+  ใช้ทำอะไร: รอ thread ทำงานเสร็จ
+
+- ชื่อ: sleep(1)
+  ใช้ทำอะไร: จำลองงานที่ใช้เวลา
+
+
+----------------------------------------------------------------
+
+6.3 Function greet_diners(customer)
+-----------------------------------
+
+ในไฟล์นี้ greeting ยังเป็น synchronous เหมือนเดิม:
+
+[โค้ด / แผนภาพ : python]
+def greet_diners(customer):
+    print(f"{ctime()} -> Greeting for customer-{customer} ...")
+    sleep(1)
+    print(f"{ctime()} -> Greeting for customer-{customer} ...Done!")
+[จบโค้ด / แผนภาพ]
+
+ดังนั้นช่วง greeting ยังใช้เวลาประมาณ 3 วินาที
+
+----------------------------------------------------------------
+
+6.4 Function customer_private_workflow(customer)
+------------------------------------------------
+
+นี่คือ function ที่แต่ละ thread จะไปรันเอง:
+
+[โค้ด / แผนภาพ : python]
+def customer_private_workflow(customer):
+    print(f"{ctime()} [Thread-{customer}] -> Taking Order ...")
+    sleep(1)
+    print(f"{ctime()} [Thread-{customer}] -> Taking Order ...Done!")
+
+    print(f"{ctime()} [Thread-{customer}] -> Cooking ...")
+    sleep(1)
+    print(f"{ctime()} [Thread-{customer}] -> Cooking ...Done!")
+
+    print(f"{ctime()} [Thread-{customer}] -> Mini bar ...")
+    sleep(1)
+    print(f"{ctime()} [Thread-{customer}] -> Mini bar ...Done!")
+[จบโค้ด / แผนภาพ]
+
+ชื่อ customer_private_workflow แปลว่า workflow ส่วนตัวของลูกค้าแต่ละคน
+
+ถ้า customer เป็น A output จะมี label:
+
+[โค้ด / แผนภาพ : text]
+[Thread-A]
+[จบโค้ด / แผนภาพ]
+
+ถ้า customer เป็น B output จะมี label:
+
+[โค้ด / แผนภาพ : text]
+[Thread-B]
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+6.5 จุดสำคัญใน main
+-------------------
+
+[โค้ด / แผนภาพ : python]
+processes = []
+
+for customer in customers:
+    t = threading.Thread(target=customer_private_workflow, args=(customer,))
+    t.start()
+    processes.append(t)
+
+for t in processes:
+    t.join()
+[จบโค้ด / แผนภาพ]
+
+ถึงตัวแปรชื่อ processes แต่ในไฟล์นี้จริง ๆ เก็บ thread objects ค่ะ
+
+อธิบายทีละบรรทัด:
+
+- บรรทัด: processes = []
+  ความหมาย: list ไว้เก็บ thread ที่สร้างแล้ว
+
+- บรรทัด: threading.Thread(...)
+  ความหมาย: สร้าง thread ใหม่
+
+- บรรทัด: target=customer_private_workflow
+  ความหมาย: ให้ thread ไปรัน function นี้
+
+- บรรทัด: args=(customer,)
+  ความหมาย: ส่ง customer เข้า function
+
+- บรรทัด: t.start()
+  ความหมาย: เริ่ม thread ทันที
+
+- บรรทัด: processes.append(t)
+  ความหมาย: เก็บไว้เพื่อรอทีหลัง
+
+- บรรทัด: t.join()
+  ความหมาย: รอ thread นั้นให้เสร็จ
+
+
+----------------------------------------------------------------
+
+6.6 ทำไมต้องมี comma ใน args=(customer,)
+----------------------------------------
+
+ใน Python tuple ที่มีสมาชิกตัวเดียวต้องใส่ comma:
+
+[โค้ด / แผนภาพ : python]
+args=(customer,)
+[จบโค้ด / แผนภาพ]
+
+ถ้าเขียนแบบนี้:
+
+[โค้ด / แผนภาพ : python]
+args=(customer)
+[จบโค้ด / แผนภาพ]
+
+Python จะมองว่าเป็น string ธรรมดา ไม่ใช่ tuple
+
+----------------------------------------------------------------
+
+6.7 Example output ที่ควรเข้าใจ
+-------------------------------
+
+[โค้ด / แผนภาพ : text]
+--- All customers greeted, FORKING into independent processes for each customer ...
+Wed ... [Thread-A] -> Taking Order ...
+Wed ... [Thread-B] -> Taking Order ...
+Wed ... [Thread-C] -> Taking Order ...
+Wed ... [Thread-A] -> Taking Order ...Done!
+Wed ... [Thread-A] -> Cooking ...
+Wed ... [Thread-B] -> Taking Order ...Done!
+Wed ... [Thread-B] -> Cooking ...
+[จบโค้ด / แผนภาพ]
+
+จุดสังเกต:
+
+- A/B/C เริ่ม Taking Order ใกล้ ๆ กัน
+- output อาจสลับลำดับกันได้
+- เพราะ thread ทำงาน concurrent
+
+----------------------------------------------------------------
+
+6.8 Lab สำหรับ restaurant_01_thread.py
+--------------------------------------
+
+Lab A — เปลี่ยนชื่อ list ให้ตรงความหมาย
+---------------------------------------
+
+ตอนนี้ใช้:
+
+[โค้ด / แผนภาพ : python]
+processes = []
+[จบโค้ด / แผนภาพ]
+
+แต่ไฟล์นี้เก็บ thread ดังนั้นลองเปลี่ยนเป็น:
+
+[โค้ด / แผนภาพ : python]
+threads = []
+[จบโค้ด / แผนภาพ]
+
+แล้วแก้ทุกจุดที่เกี่ยวข้อง:
+
+[โค้ด / แผนภาพ : python]
+threads.append(t)
+for t in threads:
+    t.join()
+[จบโค้ด / แผนภาพ]
+
+คำถาม:
+
+1. output เปลี่ยนไหม?
+2. ทำไมเปลี่ยนชื่อตัวแปรแล้ว behavior ไม่เปลี่ยน?
+3. ชื่อตัวแปรที่ดีช่วยให้อ่านโค้ดง่ายขึ้นยังไง?
+
+Lab B — ใส่ชื่อ thread จริง
+---------------------------
+
+ลองสร้าง thread แบบมี name:
+
+[โค้ด / แผนภาพ : python]
+t = threading.Thread(
+    target=customer_private_workflow,
+    args=(customer,),
+    name=f"Thread-{customer}"
+)
+[จบโค้ด / แผนภาพ]
+
+แล้วใน function ลองอ่านชื่อ thread จริง:
+
+[โค้ด / แผนภาพ : python]
+thread_name = threading.current_thread().name
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+7. File 3 — restaurant_01_multiprocess.py
+-----------------------------------------
+
+7.1 หน้าที่ของไฟล์นี้
+---------------------
+
+ไฟล์นี้ใช้ multiprocessing เพื่อสร้าง process แยกสำหรับลูกค้าแต่ละคน
+
+flow คล้าย thread มาก แต่เปลี่ยนจาก:
+
+[โค้ด / แผนภาพ : python]
+threading.Thread(...)
+[จบโค้ด / แผนภาพ]
+
+เป็น:
+
+[โค้ด / แผนภาพ : python]
+multiprocessing.Process(...)
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+7.2 Library ที่ใช้
+------------------
+
+[โค้ด / แผนภาพ : python]
+from time import sleep, ctime, time
+import multiprocessing
+[จบโค้ด / แผนภาพ]
+
+- ชื่อ: multiprocessing.Process(...)
+  ใช้ทำอะไร: สร้าง process ใหม่
+
+- ชื่อ: p.start()
+  ใช้ทำอะไร: เริ่ม process
+
+- ชื่อ: p.join()
+  ใช้ทำอะไร: รอ process จบ
+
+
+----------------------------------------------------------------
+
+7.3 Function สำคัญ
+------------------
+
+greet_diners(customer) เหมือน thread version คือ greeting เรียงกันก่อน
+
+customer_private_workflow(customer) คือ workflow ที่ process ลูกจะทำ:
+
+[โค้ด / แผนภาพ : python]
+def customer_private_workflow(customer):
+    print(f"{ctime()} [Process-{customer}] -> Taking Order ...")
+    sleep(1)
+    print(f"{ctime()} [Process-{customer}] -> Taking Order ...Done!")
+
+    print(f"{ctime()} [Process-{customer}] -> Cooking ...")
+    sleep(1)
+    print(f"{ctime()} [Process-{customer}] -> Cooking ...Done!")
+
+    print(f"{ctime()} [Process-{customer}] -> Mini bar ...")
+    sleep(1)
+    print(f"{ctime()} [Process-{customer}] -> Mini bar ...Done!")
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+7.4 จุดสำคัญใน main
+-------------------
+
+[โค้ด / แผนภาพ : python]
+processes = []
+
+for customer in customers:
+    p = multiprocessing.Process(target=customer_private_workflow, args=(customer,))
+    p.start()
+    processes.append(p)
+
+for p in processes:
+    p.join()
+[จบโค้ด / แผนภาพ]
+
+อธิบาย:
+
+- บรรทัด: p = multiprocessing.Process(...)
+  ความหมาย: สร้าง process ลูก
+
+- บรรทัด: target=customer_private_workflow
+  ความหมาย: process ลูกจะรัน function นี้
+
+- บรรทัด: args=(customer,)
+  ความหมาย: ส่งค่า customer เข้าไป
+
+- บรรทัด: p.start()
+  ความหมาย: เริ่ม process
+
+- บรรทัด: processes.append(p)
+  ความหมาย: เก็บ process ไว้ใน list
+
+- บรรทัด: p.join()
+  ความหมาย: process หลักรอ process ลูกเสร็จ
+
+
+----------------------------------------------------------------
+
+7.5 ทำไมต้องมี if __name__ == "__main__"
+----------------------------------------
+
+ไฟล์นี้มี:
+
+[โค้ด / แผนภาพ : python]
+if __name__ == "__main__":
+    customers = ["A", "B", "C"]
+    ...
+[จบโค้ด / แผนภาพ]
+
+สำหรับ multiprocessing สำคัญมาก โดยเฉพาะบน Windows เพราะถ้าไม่มี guard นี้ process
+ลูกอาจ import ไฟล์ซ้ำแล้วสร้าง process ต่อไม่หยุด
+
+จำง่าย ๆ:
+
+[โค้ด / แผนภาพ : text]
+ถ้าใช้ multiprocessing ต้องมี if __name__ == "__main__": เสมอ
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+7.6 Example output ที่ควรเข้าใจ
+-------------------------------
+
+[โค้ด / แผนภาพ : text]
+--- All customers greeted, FORKING into independent processes for each customer ...
+Wed ... [Process-A] -> Taking Order ...
+Wed ... [Process-B] -> Taking Order ...
+Wed ... [Process-C] -> Taking Order ...
+Wed ... [Process-A] -> Taking Order ...Done!
+Wed ... [Process-A] -> Cooking ...
+[จบโค้ด / แผนภาพ]
+
+จุดสังเกต:
+
+- output ของ process อาจสลับแปลกกว่า thread ได้
+- บางครั้งเวลารวมอาจมากกว่า 6 วิเล็กน้อย เพราะ process มี overhead มากกว่า thread
+- ตอนที่ไอริสรันจริงได้ Total Operation time: 7.69 seconds ในรอบนั้น ซึ่งถือว่าเป็น
+  overhead/สภาพแวดล้อมการรันได้ค่ะ
+
+----------------------------------------------------------------
+
+7.7 Lab สำหรับ restaurant_01_multiprocess.py
+--------------------------------------------
+
+Lab A — ดู PID ของแต่ละ process
+-------------------------------
+
+เพิ่ม import:
+
+[โค้ด / แผนภาพ : python]
+import os
+[จบโค้ด / แผนภาพ]
+
+ใน customer_private_workflow เพิ่ม:
+
+[โค้ด / แผนภาพ : python]
+pid = os.getpid()
+print(f"PID: {pid}")
+[จบโค้ด / แผนภาพ]
+
+คำถาม:
+
+1. ลูกค้า A/B/C มี PID เหมือนกันไหม?
+2. PID ของ process ลูกเหมือนกับ process หลักไหม?
+3. สิ่งนี้ต่างจาก thread ยังไง?
+
+Lab B — เปรียบเทียบเวลารัน
+--------------------------
+
+รันไฟล์นี้ 3 รอบ:
+
+[โค้ด / แผนภาพ : bash]
+python3 Week2/restaurant_01_multiprocess.py
+python3 Week2/restaurant_01_multiprocess.py
+python3 Week2/restaurant_01_multiprocess.py
+[จบโค้ด / แผนภาพ]
+
+คำถาม:
+
+1. เวลารวมเท่ากันทุกรอบไหม?
+2. ทำไม multiprocessing อาจแกว่งกว่า asyncio/thread?
+
+----------------------------------------------------------------
+
+8. File 4 — restaurant_01_asyncio.py
+------------------------------------
+
+8.1 หน้าที่ของไฟล์นี้
+---------------------
+
+ไฟล์นี้ใช้ asyncio สร้าง async task สำหรับลูกค้าแต่ละคน
+
+flow คือ:
+
+[โค้ด / แผนภาพ : text]
+await Greeting A
+await Greeting B
+await Greeting C
+create task ของ A
+create task ของ B
+create task ของ C
+await task ทุกตัว
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+8.2 Library ที่ใช้
+------------------
+
+[โค้ด / แผนภาพ : python]
+import asyncio
+import threading
+from time import ctime,time
+[จบโค้ด / แผนภาพ]
+
+ในโค้ดล่าสุด:
+
+- asyncio ใช้จริง
+- ctime และ time ใช้จริง
+- threading import มา แต่ยังไม่ได้ใช้ในไฟล์นี้ค่ะ
+
+----------------------------------------------------------------
+
+8.3 Function greet_diners(customer)
+-----------------------------------
+
+[โค้ด / แผนภาพ : python]
+async def greet_diners(customer):
+    print(f"{ctime()} -> Greeting for customer-{customer} ...")
+    await asyncio.sleep(1)
+    print(f"{ctime()} -> Greeting for customer-{customer} ...Done!")
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ:
+
+- เป็น async def
+- ใช้ await asyncio.sleep(1) แทน sleep(1)
+- ต้องถูกเรียกด้วย await greet_diners(customer)
+
+ใน main() ตอนนี้เขียนแบบนี้:
+
+[โค้ด / แผนภาพ : python]
+for customer in customers:
+    await greet_diners(customer)
+[จบโค้ด / แผนภาพ]
+
+แปลว่า greeting ยังเรียงกันอยู่ ไม่ได้ concurrent
+
+----------------------------------------------------------------
+
+8.4 Function customer_private_workflow(customer)
+------------------------------------------------
+
+[โค้ด / แผนภาพ : python]
+async def customer_private_workflow(customer):
+    print(f"{ctime()} [Task-{customer}] Taking Order ...")
+    await asyncio.sleep(1)
+    print(f"{ctime()} [Task-{customer}] Taking Order ...Done!")
+
+    print(f"{ctime()} [Task-{customer}] Cooking Spaghetti ...")
+    await asyncio.sleep(1)
+    print(f"{ctime()} [Task-{customer}] Cooking Spaghetti ...Done!")
+
+    print(f"{ctime()} [Task-{customer}] Manage bar for Drink ...")
+    await asyncio.sleep(1)
+    print(f"{ctime()} [Task-{customer}] Manage bar for Drink ...Done!")
+
+    print(f"\n{ctime()} [Task-{customer}] All served!")
+[จบโค้ด / แผนภาพ]
+
+จุดที่ควรรู้:
+
+- แต่ละลูกค้าเป็น coroutine แยกกัน
+- แต่ละจุด await asyncio.sleep(1) คือจุดที่ event loop สามารถสลับไปทำ task อื่นได้
+- label [Task-A], [Task-B], [Task-C] ไม่ได้มาจากชื่อ task จริง แต่เขียนจากค่า customer
+  ใน f-string
+
+----------------------------------------------------------------
+
+8.5 จุดสำคัญใน main()
+---------------------
+
+[โค้ด / แผนภาพ : python]
+tasks = []
+
+for customer in customers:
+    task = asyncio.create_task(customer_private_workflow(customer))
+    tasks.append(task)
+
+for task in tasks:
+    await task
+[จบโค้ด / แผนภาพ]
+
+อธิบายทีละส่วน:
+
+- บรรทัด: tasks = []
+  ความหมาย: list เก็บ task ทั้งหมด
+
+- บรรทัด: asyncio.create_task(...)
+  ความหมาย: ส่ง coroutine ให้ event loop เริ่มจัดการ
+
+- บรรทัด: tasks.append(task)
+  ความหมาย: เก็บ task ไว้รอทีหลัง
+
+- บรรทัด: for task in tasks: await task
+  ความหมาย: รอ task ทุกตัวให้เสร็จ
+
+
+ถึงจะ await ทีละ task ใน loop แต่เพราะ task ทั้งหมดถูก create_task ก่อนแล้ว งานจึงเริ่ม
+concurrent ได้ค่ะ
+
+----------------------------------------------------------------
+
+8.6 ทำไม asyncio ใช้เวลาประมาณ 6 วิ
+-----------------------------------
+
+Greeting:
+
+[โค้ด / แผนภาพ : python]
+for customer in customers:
+    await greet_diners(customer)
+[จบโค้ด / แผนภาพ]
+
+ตรงนี้ใช้ประมาณ 3 วิ เพราะ await ทีละคน
+
+หลัง greeting:
+
+[โค้ด / แผนภาพ : python]
+for customer in customers:
+    task = asyncio.create_task(customer_private_workflow(customer))
+    tasks.append(task)
+[จบโค้ด / แผนภาพ]
+
+ตรงนี้สร้าง task A/B/C ก่อน แล้วแต่ละ task มี 3 งาน งานละ 1 วิ จึงใช้ประมาณ 3 วิ
+
+รวมประมาณ:
+
+[โค้ด / แผนภาพ : text]
+3 วิ greeting + 3 วิ workflow concurrent = 6 วิ
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+8.7 Example output ที่ควรเข้าใจ
+-------------------------------
+
+[โค้ด / แผนภาพ : text]
+Wed ... -> Greeting for customer-A ...
+Wed ... -> Greeting for customer-A ...Done!
+Wed ... -> Greeting for customer-B ...
+Wed ... -> Greeting for customer-B ...Done!
+Wed ... -> Greeting for customer-C ...
+Wed ... -> Greeting for customer-C ...Done!
+Wed ... --- All customers greeted, FORKING into independent tasks for each customer ...
+Wed ... [Task-A] Taking Order ...
+Wed ... [Task-B] Taking Order ...
+Wed ... [Task-C] Taking Order ...
+Wed ... [Task-A] Taking Order ...Done!
+Wed ... [Task-A] Cooking Spaghetti ...
+Wed ... [Task-B] Taking Order ...Done!
+Wed ... [Task-B] Cooking Spaghetti ...
+[จบโค้ด / แผนภาพ]
+
+จุดสังเกต:
+
+- Task A/B/C เริ่ม Taking Order ในเวลาใกล้กัน
+- หลัง await asyncio.sleep(1) event loop สลับไปให้ task อื่นทำงาน
+- output อาจ interleave กัน
+
+----------------------------------------------------------------
+
+8.8 Lab สำหรับ restaurant_01_asyncio.py
+---------------------------------------
+
+Lab A — ใช้ asyncio.gather() แทน await ทีละ task
+------------------------------------------------
+
+ตอนนี้ใช้:
+
+[โค้ด / แผนภาพ : python]
+for task in tasks:
+    await task
+[จบโค้ด / แผนภาพ]
+
+ลองเปลี่ยนเป็น:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.gather(*tasks)
+[จบโค้ด / แผนภาพ]
+
+คำถาม:
+
+1. output เปลี่ยนมากไหม?
+2. เวลารวมยังประมาณ 6 วิไหม?
+3. gather() อ่านง่ายกว่าไหมเวลา task เยอะ?
+
+Lab B — ทำ Greeting ให้ concurrent ด้วย
+---------------------------------------
+
+ตอนนี้ greeting เรียงกัน:
+
+[โค้ด / แผนภาพ : python]
+for customer in customers:
+    await greet_diners(customer)
+[จบโค้ด / แผนภาพ]
+
+ลองเปลี่ยนเป็น:
+
+[โค้ด / แผนภาพ : python]
+greeting_tasks = []
+for customer in customers:
+    greeting_tasks.append(asyncio.create_task(greet_diners(customer)))
+await asyncio.gather(*greeting_tasks)
+[จบโค้ด / แผนภาพ]
+
+คำถาม:
+
+1. เวลารวมควรลดจาก 6 วิ เหลือประมาณกี่วิ?
+2. output greeting ยังเรียง A/B/C แบบเดิมไหม?
+3. ถ้า greeting คือการคุยกับลูกค้าจริง ๆ ควร concurrent ไหม หรือควรเรียงทีละคน?
+
+เฉลยแนวคิด:
+
+- ถ้า greeting concurrent ใช้ประมาณ 1 วิ
+- workflow หลัง greeting ใช้ประมาณ 3 วิ
+- รวมประมาณ 4 วิ
+
+----------------------------------------------------------------
+
+9. เปรียบเทียบ Thread vs Process vs Asyncio ใน Lab นี้
+------------------------------------------------------
+
+- เรื่อง: สร้างด้วย
+  Thread: threading.Thread
+  Process: multiprocessing.Process
+  Asyncio: asyncio.create_task
+
+- เรื่อง: รอด้วย
+  Thread: join()
+  Process: join()
+  Asyncio: await หรือ gather()
+
+- เรื่อง: ใช้ memory
+  Thread: process เดียวกัน
+  Process: แยก process/memory
+  Asyncio: process/thread เดียวโดยทั่วไป
+
+- เรื่อง: เหมาะกับ
+  Thread: งานรอ I/O
+  Process: งาน CPU หนัก
+  Asyncio: งานรอ I/O จำนวนมาก
+
+- เรื่อง: overhead
+  Thread: ปานกลาง
+  Process: สูงกว่า
+  Asyncio: ต่ำกว่า
+
+- เรื่อง: ใน Lab นี้
+  Thread: ทำพร้อมกันหลัง greeting
+  Process: ทำพร้อมกันหลัง greeting
+  Asyncio: สลับ task หลัง greeting
+
+
+----------------------------------------------------------------
+
+10. Lab รวมทั้ง 4 ไฟล์
+----------------------
+
+Lab รวม A — ทำนายเวลาก่อนรัน
+----------------------------
+
+ก่อนรัน ให้เติมตารางนี้เอง:
+
+- ไฟล์: simple
+  Greeting ใช้กี่วิ: 3
+  Workflow ใช้กี่วิ: 9
+  รวมที่คาดไว้: 12
+
+- ไฟล์: thread
+  Greeting ใช้กี่วิ: 3
+  Workflow ใช้กี่วิ: 3
+  รวมที่คาดไว้: 6
+
+- ไฟล์: multiprocess
+  Greeting ใช้กี่วิ: 3
+  Workflow ใช้กี่วิ: 3 + overhead
+  รวมที่คาดไว้: 6-8
+
+- ไฟล์: asyncio
+  Greeting ใช้กี่วิ: 3
+  Workflow ใช้กี่วิ: 3
+  รวมที่คาดไว้: 6
+
+
+จากนั้นรัน:
+
+[โค้ด / แผนภาพ : bash]
+python3 Week2/restaurant_01_simple.py
+python3 Week2/restaurant_01_thread.py
+python3 Week2/restaurant_01_multiprocess.py
+python3 Week2/restaurant_01_asyncio.py
+[จบโค้ด / แผนภาพ]
+
+แล้วจดเวลาจริงค่ะ
+
+----------------------------------------------------------------
+
+Lab รวม B — เพิ่มลูกค้า D
+-------------------------
+
+แก้ทุกไฟล์:
+
+[โค้ด / แผนภาพ : python]
+customers = ["A", "B", "C", "D"]
+[จบโค้ด / แผนภาพ]
+
+ทำนายเวลา:
+
+- ไฟล์: simple
+  เวลาที่คาดไว้: 4 + 12 = 16 วิ
+
+- ไฟล์: thread
+  เวลาที่คาดไว้: 4 + 3 = 7 วิ
+
+- ไฟล์: multiprocess
+  เวลาที่คาดไว้: 4 + 3 + overhead = ประมาณ 7-9 วิ
+
+- ไฟล์: asyncio
+  เวลาที่คาดไว้: 4 + 3 = 7 วิ
+
+
+คำถาม:
+
+1. ทำไม simple เพิ่มเยอะที่สุด?
+2. ทำไม thread/process/asyncio เพิ่มแค่ช่วง greeting?
+3. ถ้า greeting ก็ทำ concurrent ด้วย เวลาจะเหลือประมาณเท่าไร?
+
+----------------------------------------------------------------
+
+Lab รวม C — เปลี่ยนเวลาทำอาหารเป็น 2 วิ
+---------------------------------------
+
+เปลี่ยนเฉพาะขั้น Cooking:
+
+ใน simple/thread/process:
+
+[โค้ด / แผนภาพ : python]
+sleep(2)
+[จบโค้ด / แผนภาพ]
+
+ใน asyncio:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.sleep(2)
+[จบโค้ด / แผนภาพ]
+
+ทำนายเวลา:
+
+- ไฟล์: simple
+  เวลาที่คาดไว้: greeting 3 + workflow 12 = 15 วิ
+
+- ไฟล์: thread
+  เวลาที่คาดไว้: greeting 3 + workflow 4 = 7 วิ
+
+- ไฟล์: multiprocess
+  เวลาที่คาดไว้: greeting 3 + workflow 4 + overhead = 7+ วิ
+
+- ไฟล์: asyncio
+  เวลาที่คาดไว้: greeting 3 + workflow 4 = 7 วิ
+
+
+----------------------------------------------------------------
+
+11. Example: ทำไม create ก่อน await ถึง concurrent
+--------------------------------------------------
+
+ใน asyncio ถ้าเขียนแบบนี้:
+
+[โค้ด / แผนภาพ : python]
+for customer in customers:
+    await customer_private_workflow(customer)
+[จบโค้ด / แผนภาพ]
+
+จะกลายเป็นเรียงกัน:
+
+[โค้ด / แผนภาพ : text]
+A เสร็จหมด -> B เสร็จหมด -> C เสร็จหมด
+[จบโค้ด / แผนภาพ]
+
+แต่โค้ดปัจจุบันทำแบบนี้:
+
+[โค้ด / แผนภาพ : python]
+for customer in customers:
+    task = asyncio.create_task(customer_private_workflow(customer))
+    tasks.append(task)
+
+for task in tasks:
+    await task
+[จบโค้ด / แผนภาพ]
+
+แปลว่า:
+
+[โค้ด / แผนภาพ : text]
+สร้าง Task-A
+สร้าง Task-B
+สร้าง Task-C
+แล้วค่อยรอทุก task
+[จบโค้ด / แผนภาพ]
+
+จุดนี้สำคัญมากค่ะ เพราะเป็นเหตุผลที่ output สลับกันและเวลารวมสั้นลง
+
+----------------------------------------------------------------
+
+12. Common Mistakes ที่ต้องระวัง
+--------------------------------
+
+12.1 ลืม join() ใน thread/process
+---------------------------------
+
+ถ้าไม่ join:
+
+[โค้ด / แผนภาพ : python]
+for t in processes:
+    t.join()
+[จบโค้ด / แผนภาพ]
+
+main program อาจจบก่อนงานลูกเสร็จ หรือเวลา total อาจไม่สะท้อนงานจริง
+
+----------------------------------------------------------------
+
+12.2 ลืม await ใน asyncio
+-------------------------
+
+ผิด:
+
+[โค้ด / แผนภาพ : python]
+greet_diners(customer)
+[จบโค้ด / แผนภาพ]
+
+ถูก:
+
+[โค้ด / แผนภาพ : python]
+await greet_diners(customer)
+[จบโค้ด / แผนภาพ]
+
+ถ้าลืม await จะได้ coroutine object แต่ไม่รันจริง
+
+----------------------------------------------------------------
+
+12.3 ใช้ time.sleep() ใน async function
+---------------------------------------
+
+ผิด:
+
+[โค้ด / แผนภาพ : python]
+async def customer_private_workflow(customer):
+    sleep(1)
+[จบโค้ด / แผนภาพ]
+
+ถึงจะรันได้ถ้า import มา แต่จะ block event loop ทำให้ task อื่นไม่ได้ทำงานระหว่างรอ
+
+ถูก:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.sleep(1)
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+12.4 เข้าใจผิดว่า multiprocessing output ต้องเรียงเสมอ
+------------------------------------------------------
+
+process ทำงานแยกกัน ดังนั้น output อาจสลับ ไม่เรียง A/B/C เสมอค่ะ
+
+นี่ไม่ใช่ error ถ้า logic ถูกและทุก process join() ครบ
+
+----------------------------------------------------------------
+
+12.5 ชื่อตัวแปรไม่ตรงความหมาย
+-----------------------------
+
+ใน restaurant_01_thread.py ใช้ตัวแปรชื่อ processes เพื่อเก็บ thread
+
+โค้ดรันได้ แต่เวลาอ่านอาจสับสน ควรรู้ว่า:
+
+[โค้ด / แผนภาพ : python]
+processes = []  # ในไฟล์ thread นี้จริง ๆ คือ list ของ thread
+[จบโค้ด / แผนภาพ]
+
+ถ้าจะทำให้สะอาดขึ้น ใช้ threads = [] จะตรงกว่า
+
+----------------------------------------------------------------
+
+13. คำสั่งตรวจงาน
+-----------------
+
+ตรวจ syntax:
+
+[โค้ด / แผนภาพ : bash]
+python3 -m py_compile \
+  Week2/restaurant_01_simple.py \
+  Week2/restaurant_01_thread.py \
+  Week2/restaurant_01_multiprocess.py \
+  Week2/restaurant_01_asyncio.py
+[จบโค้ด / แผนภาพ]
+
+รันทีละไฟล์:
+
+[โค้ด / แผนภาพ : bash]
+python3 Week2/restaurant_01_simple.py
+python3 Week2/restaurant_01_thread.py
+python3 Week2/restaurant_01_multiprocess.py
+python3 Week2/restaurant_01_asyncio.py
+[จบโค้ด / แผนภาพ]
+
+รันทั้งหมดแบบ loop:
+
+[โค้ด / แผนภาพ : bash]
+for f in Week2/restaurant_01_*.py; do
+  echo "===== $f ====="
+  python3 "$f"
+  echo
+done
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+14. สรุปสั้นที่สุด
+------------------
+
+[โค้ด / แผนภาพ : text]
+simple:
+  ทุกอย่างเรียงกัน จึงช้าที่สุด
+
+thread:
+  greeting เรียงกัน แต่หลังจากนั้นลูกค้าแต่ละคนแยก thread ทำงานพร้อมกัน
+
+multiprocess:
+  greeting เรียงกัน แต่หลังจากนั้นลูกค้าแต่ละคนแยก process ทำงานพร้อมกัน
+
+asyncio:
+  greeting เรียงกัน แต่หลังจากนั้นลูกค้าแต่ละคนเป็น async task และสลับกันทำตอน await
+[จบโค้ด / แผนภาพ]
+
+จำหัวใจของงานนี้แบบนี้ค่ะ:
+
+[โค้ด / แผนภาพ : text]
+ความต่างไม่ได้อยู่ที่ร้านอาหารทำอะไร
+แต่อยู่ที่ “จัดคิวงานหลัง greeting ยังไง”
+[จบโค้ด / แผนภาพ]
+
+ถ้าใบอธิบายได้ว่า start(), join(), create_task(), และ await ทำอะไร ใบจะเข้าใจ Lab
+นี้แล้วค่ะ

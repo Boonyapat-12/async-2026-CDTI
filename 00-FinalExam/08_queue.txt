@@ -1,3 +1,72 @@
+บท 7 — Queue, Producer–Consumer และ Backpressure
+========================================================================
+
+[QUEUE-01] FIFO และหน้าที่
+Producer สร้างงานแล้ว put; Consumer get แล้วประมวลผล
+FIFO รับประกันลำดับนำออกตามคิว ไม่รับประกันลำดับงานเสร็จเมื่อมีหลาย worker
+Head เป็นจุดนำออก; Tail เป็นจุดเพิ่มเข้า
+Queue แยกอัตราผลิตกับอัตราประมวลผล และช่วยแบ่งงานให้ worker
+
+[QUEUE-02] API จำเป็น
+await q.put(x): รอพื้นที่ถ้าคิวเต็ม
+await q.get(): รอข้อมูลถ้าคิวว่าง
+q.put_nowait(x): ไม่รอ; คิวเต็ม -> QueueFull
+q.get_nowait(): ไม่รอ; คิวว่าง -> QueueEmpty
+q.task_done(): แจ้งหนึ่งงานที่ get มาได้รับการจัดการแล้ว ไม่ await
+await q.join(): รอ unfinished task count เป็นศูนย์ ไม่ใช่ดูแค่ q.empty()
+get() ไม่ลด unfinished count; task_done() จึงต้องเรียกให้ตรงจำนวน
+task_done() มากเกินจำนวน put เกิด ValueError
+
+[QUEUE-03] Bounded queue
+maxsize=2 เก็บ item ที่ยังอยู่ในคิวได้สูงสุด 2 ไม่รวมงานที่ worker get ไปแล้ว
+maxsize<=0 ไม่จำกัดขนาด; อาจใช้ memory มากถ้าผลิตเร็วกว่าประมวลผล
+Backpressure: producer รอพื้นที่ ทำให้การผลิตถูกชะลอตามความสามารถผู้รับ
+asyncio.Queue ใช้กับ coroutine ใน loop ไม่ใช่ queue ข้าม thread/process
+
+[QUEUE-04] หยุด worker ด้วย sentinel
+ใช้ None เมื่อ payload ปกติไม่เป็น None; worker หลายตัวต้องส่งเท่าจำนวน worker
+join ไม่ได้หยุด worker ต้องกำหนด lifecycle แยกต่างหาก
+ตัวอย่างถือว่างานที่ get มาได้รับการจัดการสำเร็จ/ล้มเหลวเมื่อออก finally
+หากงานล้มเหลวและต้อง retry ต้องออกแบบ retry/error queue เพิ่มเอง
+
+[CODE queue_workers]
+import asyncio  # ใช้ queue และ worker
+async def main():
+    queue = asyncio.Queue(maxsize=2)  # จำกัดงานรอในคิว
+    results = []  # เก็บผลของตัวอย่าง
+    async def worker():
+        while True:
+            item = await queue.get()  # รอและรับงาน
+            try:
+                if item is None:  # sentinel หยุด worker
+                    return
+                await asyncio.sleep(0)  # จำลองงานที่รอได้
+                results.append(item * 2)  # ประมวลผล
+            finally:
+                queue.task_done()  # ตรงกับทุก get รวม sentinel
+    workers = [asyncio.create_task(worker()) for _ in range(2)]
+    for item in (1, 2, 3):  # ผลิตสามงาน
+        await queue.put(item)
+    for _ in workers:  # ส่ง sentinel คนละหนึ่ง
+        await queue.put(None)
+    await queue.join()  # รอการบัญชีงานครบ
+    await asyncio.gather(*workers)  # รอ worker หยุดจริง
+    print(sorted(results))  # ไม่สมมติลำดับเสร็จของ worker
+asyncio.run(main())  # เริ่มสคริปต์
+[END CODE]
+
+[QUEUE-05] แก้คิวค้าง
+join ค้าง -> ลืม task_done / producer ยังเติม / worker fail ก่อนรับงานที่เหลือ
+put ค้าง -> คิวเต็มและไม่มี consumer เดิน
+get ค้าง -> ไม่มีข้อมูลใหม่และไม่มี sentinel
+อย่าแก้ด้วย task_done แบบเดา: ต้องตามบัญชีงานจริง
+repo: Week8/01_synchronous_vs_asynchronous.py ถึง 08_coupon_producer_consumer2.py
+
+========================================================================
+ภาคผนวก — โน้ตเดิมแปลงเป็นข้อความ (เก็บเนื้อหาไว้สำหรับอ่านละเอียด)
+ข้อสังเกต: โน้ตอาจอธิบายตัวอย่างคนละเวอร์ชันกับโค้ดปัจจุบัน
+ให้ใช้บทนำของคู่มือนี้เมื่อเปรียบเทียบค่าจริงกับ repo
+
 Queue — สรุปเนื้อหาแบบอ่านง่าย
 ==============================
 

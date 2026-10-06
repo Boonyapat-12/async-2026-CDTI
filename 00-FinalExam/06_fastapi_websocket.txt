@@ -1,0 +1,3977 @@
+บท 5 — FastAPI และ WebSocket
+========================================================================
+
+[API-01] เลือก def / async def
+FastAPI เรียก path operation แบบ def ผ่าน thread pool
+path operation แบบ async def ทำบน event loop และควรใช้ async I/O
+helper def ที่เรียกตรงจาก async def ไม่ถูกย้ายเข้า thread pool ให้อัตโนมัติ
+time.sleep ใน async def บล็อก loop; await asyncio.sleep ยอมให้งานอื่นเดิน
+Week5/fastapi_async_basic_lab.py มี /sync-delay และ /async-delay ให้เปรียบเทียบ
+
+template ต่อไปนี้บันทึกเป็น demo_api.py เมื่อมี FastAPI/Uvicorn
+คำสั่ง: python -m uvicorn demo_api:app --port 8000
+ทดสอบ: GET http://127.0.0.1:8000/delay -> {"ok": true}
+
+[CODE fastapi_template]
+import asyncio  # ใช้การรอแบบ async
+from fastapi import FastAPI  # สร้าง API
+app = FastAPI()  # instance ของ application
+@app.get("/delay")  # ระบุ method และ path
+async def delay():  # handler แบบ async
+    await asyncio.sleep(0.01)  # คืนการควบคุมระหว่างรอ
+    return {"ok": True}  # FastAPI แปลงเป็น JSON response
+[END CODE]
+
+[WS-01] WebSocket ต่างจาก HTTP request/response อย่างไร?
+WebSocket เป็น connection ที่เปิดไว้เพื่อส่งข้อมูลสองทิศทางหลายข้อความ
+เหมาะกับ live dashboard/chat; ไม่ต้องส่ง GET ใหม่เพื่อรับทุก update
+server ต้อง accept connection ก่อนใช้งาน แล้ว receive/send ตาม protocol
+ต้องจัดการ disconnect และนำ connection ออกจากรายการผู้รับ
+ผู้รับช้าอาจทำให้ sequential broadcast ช้า ต้องออกแบบ buffering/backpressure
+
+[CODE websocket_template]
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # WebSocket API
+app = FastAPI()  # application
+@app.websocket("/ws")  # route ของ WebSocket
+async def echo(ws: WebSocket):  # connection แต่ละตัวมี handler
+    await ws.accept()  # ยอมรับ connection
+    try:
+        while True:  # อ่านจน client disconnect
+            text = await ws.receive_text()  # รอข้อความ
+            await ws.send_text(text)  # ตอบกลับข้อความเดิม
+    except WebSocketDisconnect:  # client ปิด connection
+        pass  # ตัวอย่างไม่มีรายการ connection ให้ล้าง
+[END CODE]
+
+ผลที่คาดหวังเมื่อรัน server และใช้ WebSocket client: ส่ง hello แล้วรับ hello
+template นี้ไม่มี authentication หรือ deployment configuration
+repo: Week5/chat-hello/main.py, Week5/rocket/main.py,
+Week10/web_dashboard.py: Redis listener รับ state แล้ว ConnectionManager broadcast
+
+========================================================================
+อ่านละเอียด — คู่มือเดิมจาก Week5_FastAPI_WebSocket_Rocket_Guide.md
+คำสั่งติดตั้ง/ส่ง request เป็นตัวอย่างสำหรับเตรียม lab ไม่ใช่สิ่งที่ได้รันในการตรวจหนังสือ
+endpoint และค่าห้องเรียนต้องตรวจใหม่ก่อนใช้งาน
+
+Week 5 FastAPI, Async HTTP, WebSocket และ Rocket Study Guide
+============================================================
+
+คู่มือนี้อธิบายจาก โค้ดจริงใน Week 5 เท่านั้น เหมาะสำหรับผู้เริ่มต้น ใช้ทำแล็บ
+และใช้ทบทวนก่อนสอบเรื่อง FastAPI, HTTP API, async/await, HTTPX, WebSocket, broadcast
+และระบบจรวดแบบ real-time
+
+ไฟล์ต้นฉบับที่ใช้ทั้งหมด 10 ไฟล์:
+
+- Week5/fastapi_basic_lab.py
+- Week5/fastapi_async_basic_lab.py
+- Week5/fastapi_async_external_api_lab.py
+- Week5/chat-hello/main.py
+- Week5/chat-hello/client.py
+- Week5/chat-hello/client2.py
+- Week5/rocket/main.py
+- Week5/rocket/dashboard.py
+- Week5/rocket/student.py
+- Week5/rocket/student2.py
+
+เป้าหมาย: อ่านจบแล้วควรสร้างและอธิบาย HTTP endpoint ได้ แยก path/query/body ได้ เข้าใจ
+blocking กับ non-blocking เรียก API ภายนอกแบบ sequential/concurrent และอธิบายการสื่อสาร
+WebSocket ของห้องแชตกับเกมจรวดได้
+
+----------------------------------------------------------------
+
+1. ภาพรวม Week 5 กำลังเรียนอะไร
+-------------------------------
+
+Week 5 เดินจากเว็บ API ธรรมดาไปสู่ระบบ real-time เป็นลำดับ:
+
+[โค้ด / แผนภาพ : text]
+FastAPI พื้นฐาน
+GET / POST / Path / Query / JSON / Pydantic
+              |
+              v
+FastAPI + async/await
+blocking เทียบ non-blocking และ asyncio.gather()
+              |
+              v
+Async HTTP Client
+ใช้ httpx เรียก API ภายนอก + timeout + fallback
+              |
+              v
+WebSocket Chat
+เชื่อมต่อค้างไว้ รับ-ส่งข้อความสองทางและ broadcast
+              |
+              v
+Rocket Real-time System
+ส่งคำสั่ง CONTROL และกระจายสถานะจรวดให้ Dashboard
+[จบโค้ด / แผนภาพ]
+
+🎯 ใช้ทำอะไรได้หลังเรียน
+-----------------------
+
+- สร้าง REST-like API สำหรับอ่านและรับข้อมูล
+- ทำ endpoint ที่รองรับงานรอ I/O โดยไม่ block event loop
+- ดึงข้อมูลหลายแหล่งพร้อมกัน
+- สร้างห้องแชตที่ข้อความปรากฏทันทีทุกหน้าจอ
+- สร้าง controller หลายเครื่องควบคุมวัตถุบน dashboard กลาง
+
+----------------------------------------------------------------
+
+2. คำศัพท์พื้นฐาน
+-----------------
+
+- คำ: FastAPI
+  ความหมายแบบง่าย: Framework สำหรับสร้างเว็บ API ด้วย Python
+  ตัวอย่างในโค้ด: app = FastAPI(...)
+
+- คำ: Uvicorn
+  ความหมายแบบง่าย: ASGI server ที่นำ FastAPI app ไปรัน
+  ตัวอย่างในโค้ด: uvicorn main:app ...
+
+- คำ: Route / Endpoint
+  ความหมายแบบง่าย: Method และ path ที่เปิดให้ client เรียก
+  ตัวอย่างในโค้ด: GET /users, WS /ws/{client_id}
+
+- คำ: HTTP GET
+  ความหมายแบบง่าย: ขออ่านข้อมูล
+  ตัวอย่างในโค้ด: @app.get("/")
+
+- คำ: HTTP POST
+  ความหมายแบบง่าย: ส่งข้อมูลไปให้ server ประมวลผล
+  ตัวอย่างในโค้ด: @app.post("/register/student")
+
+- คำ: Path parameter
+  ความหมายแบบง่าย: ค่าที่ฝังอยู่ใน path
+  ตัวอย่างในโค้ด: item_id ใน /items/{item_id}
+
+- คำ: Query parameter
+  ความหมายแบบง่าย: ค่าหลัง ? ใน URL
+  ตัวอย่างในโค้ด: ?username=Alice&age=21
+
+- คำ: Request body
+  ความหมายแบบง่าย: ข้อมูลหลักที่ส่งมากับ request
+  ตัวอย่างในโค้ด: JSON ของนักศึกษา
+
+- คำ: JSON
+  ความหมายแบบง่าย: ข้อมูลแบบ key-value
+  ตัวอย่างในโค้ด: {"type":"CONTROL"}
+
+- คำ: Pydantic model
+  ความหมายแบบง่าย: สัญญารูปแบบและชนิดข้อมูล
+  ตัวอย่างในโค้ด: SimpleStudent(BaseModel)
+
+- คำ: Validation
+  ความหมายแบบง่าย: ตรวจว่าข้อมูลตรง schema หรือไม่
+  ตัวอย่างในโค้ด: gpa ต้องแปลงเป็น float ได้
+
+- คำ: Sync / Blocking
+  ความหมายแบบง่าย: งานครอบครอง thread ขณะรอ
+  ตัวอย่างในโค้ด: time.sleep(3)
+
+- คำ: Async / Non-blocking wait
+  ความหมายแบบง่าย: ยอมคืน control ให้ event loop ระหว่างรอ
+  ตัวอย่างในโค้ด: await asyncio.sleep(3)
+
+- คำ: Coroutine
+  ความหมายแบบง่าย: งานจาก function ที่ประกาศ async def
+  ตัวอย่างในโค้ด: fetch_single_api()
+
+- คำ: Event loop
+  ความหมายแบบง่าย: ตัวสลับให้งาน async หลายงานคืบหน้า
+  ตัวอย่างในโค้ด: ทำงานเมื่อ Uvicorn รัน app
+
+- คำ: Concurrency
+  ความหมายแบบง่าย: หลายงานคืบหน้าสลับกันระหว่างรอ
+  ตัวอย่างในโค้ด: asyncio.gather(...)
+
+- คำ: HTTPX
+  ความหมายแบบง่าย: HTTP client ที่รองรับ async
+  ตัวอย่างในโค้ด: httpx.AsyncClient()
+
+- คำ: Timeout
+  ความหมายแบบง่าย: เวลารอสูงสุด
+  ตัวอย่างในโค้ด: timeout=3.0
+
+- คำ: Fallback
+  ความหมายแบบง่าย: ข้อมูลสำรองเมื่อบริการจริงล้มเหลว
+  ตัวอย่างในโค้ด: MOCK_CAT_FACT
+
+- คำ: Graceful degradation
+  ความหมายแบบง่าย: บริการยังตอบได้แม้บางส่วนเสีย
+  ตัวอย่างในโค้ด: เปลี่ยนไปคืน mock data
+
+- คำ: WebSocket
+  ความหมายแบบง่าย: connection สองทางที่เปิดค้างไว้
+  ตัวอย่างในโค้ด: /ws/{student_id}
+
+- คำ: Broadcast
+  ความหมายแบบง่าย: ส่งข้อความเดียวให้ทุก connection
+  ตัวอย่างในโค้ด: manager.broadcast(...)
+
+- คำ: Canvas
+  ความหมายแบบง่าย: พื้นที่วาดกราฟิกใน browser
+  ตัวอย่างในโค้ด: <canvas width="800" height="600">
+
+- คำ: SPAWN / UPDATE / DESPAWN
+  ความหมายแบบง่าย: event เกิด/เปลี่ยน/หายของจรวด
+  ตัวอย่างในโค้ด: JSON จาก Rocket server
+
+
+----------------------------------------------------------------
+
+Part A — FastAPI พื้นฐาน
+========================
+
+3. Week5/fastapi_basic_lab.py
+-----------------------------
+
+3.1 หน้าที่ของไฟล์
+------------------
+
+ไฟล์นี้สร้าง FastAPI app แรก และสอน 4 เรื่อง:
+
+1. GET endpoint
+2. Path parameter และการแปลง type
+3. Query parameter และ default value
+4. POST JSON body ผ่าน Pydantic model
+
+App มี metadata:
+
+[โค้ด / แผนภาพ : python]
+app = FastAPI(
+    title="CS-302: Basic FastAPI Lab",
+    description="...",
+    version="1.0.0"
+)
+[จบโค้ด / แผนภาพ]
+
+ข้อมูลนี้จะปรากฏในหน้า Swagger UI ที่ /docs
+
+3.2 ตาราง Endpoint แบบครบถ้วน
+-----------------------------
+
+- Method: GET
+  Path: /
+  รับข้อมูล: ไม่มี
+  ผลหลัก: ข้อความยืนยันว่า server ทำงาน
+
+- Method: GET
+  Path: /items/{item_id}
+  รับข้อมูล: item_id: int จาก path
+  ผลหลัก: ID, type และค่า ID คูณ 2
+
+- Method: GET
+  Path: /users
+  รับข้อมูล: username: str, age: int = 18 จาก query
+  ผลหลัก: เงื่อนไขค้นหาผู้ใช้
+
+- Method: POST
+  Path: /register/student
+  รับข้อมูล: JSON ตาม SimpleStudent
+  ผลหลัก: ข้อมูลนักศึกษาและ probation flag
+
+
+3.3 Endpoint GET /
+------------------
+
+[โค้ด / แผนภาพ : python]
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to CS-302! Your first FastAPI server is alive!"}
+[จบโค้ด / แผนภาพ]
+
+เมื่อเปิด http://127.0.0.1:8000/ server จะ print log และคืน JSON หนึ่ง field
+
+3.4 Path parameter: GET /items/{item_id}
+----------------------------------------
+
+[โค้ด / แผนภาพ : python]
+@app.get("/items/{item_id}")
+def read_item_by_id(item_id: int):
+    doubled_value = item_id * 2
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่าง:
+
+[โค้ด / แผนภาพ : text]
+GET /items/123
+item_id ใน Python -> int 123
+123 * 2 -> 246
+[จบโค้ด / แผนภาพ]
+
+Response สำคัญ:
+
+[โค้ด / แผนภาพ : json]
+{
+  "received_item_id": 123,
+  "type_in_python": "<class 'int'>",
+  "demonstration_math": "Your ID doubled is: 246"
+}
+[จบโค้ด / แผนภาพ]
+
+ถ้าเรียก /items/abc FastAPI แปลง abc เป็น int ไม่ได้ จึงตอบ validation error แทนการเข้า
+function ตามปกติ
+
+3.5 Query parameter: GET /users
+-------------------------------
+
+[โค้ด / แผนภาพ : python]
+@app.get("/users")
+def search_users(username: str, age: int = 18):
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่าง URL:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8000/users?username=Alice&age=21
+[จบโค้ด / แผนภาพ]
+
+- username ไม่มี default จึงเป็นค่าที่ต้องส่ง
+- age มี default เป็น 18
+- /users?username=Alice จึงใช้ age 18
+- /users ขาด username และจะเกิด validation error
+
+3.6 Pydantic และ POST /register/student
+---------------------------------------
+
+Schema:
+
+[โค้ด / แผนภาพ : python]
+class SimpleStudent(BaseModel):
+    student_id: str
+    nickname: str
+    gpa: float
+[จบโค้ด / แผนภาพ]
+
+JSON ตัวอย่าง:
+
+[โค้ด / แผนภาพ : json]
+{
+  "student_id": "6710301033",
+  "nickname": "Alice",
+  "gpa": 1.75
+}
+[จบโค้ด / แผนภาพ]
+
+Server คำนวณ:
+
+[โค้ด / แผนภาพ : python]
+is_academic_probation = student.gpa < 2.00
+[จบโค้ด / แผนภาพ]
+
+ดังนั้น GPA 1.75 ได้ academic_probation_alert: true แต่ GPA 2.50 ได้ false
+การตรวจนี้เป็นเพียงเงื่อนไขในแล็บ ไม่ได้บันทึกข้อมูลลงฐานข้อมูล
+
+3.7 Path, Query และ Body ต่างกันอย่างไร
+---------------------------------------
+
+- ชนิด: Path
+  อยู่ที่ไหน: เป็นส่วนหนึ่งของ URL path
+  ตัวอย่าง: /items/123
+
+- ชนิด: Query
+  อยู่ที่ไหน: หลัง ? และคั่นด้วย &
+  ตัวอย่าง: /users?username=Alice&age=21
+
+- ชนิด: Body
+  อยู่ที่ไหน: payload ภายใน request
+  ตัวอย่าง: JSON ของ SimpleStudent
+
+
+----------------------------------------------------------------
+
+Part B — FastAPI กับ Async
+==========================
+
+4. Week5/fastapi_async_basic_lab.py
+-----------------------------------
+
+4.1 Endpoint ทั้งหมด
+--------------------
+
+- Method: GET
+  Path: /sync-delay
+  วิธีรอ: time.sleep(3)
+  เวลาที่คาด: ~3 วินาที
+
+- Method: GET
+  Path: /async-delay
+  วิธีรอ: await asyncio.sleep(3)
+  เวลาที่คาด: ~3 วินาทีสำหรับ request นั้น
+
+- Method: GET
+  Path: /concurrent-tasks
+  วิธีรอ: asyncio.gather() รอ 2, 3, 1 วินาทีพร้อมกัน
+  เวลาที่คาด: ~3 วินาที
+
+
+4.2 /sync-delay — synchronous blocking
+--------------------------------------
+
+[โค้ด / แผนภาพ : python]
+@app.get("/sync-delay")
+def sync_delay():
+    time.sleep(3)
+[จบโค้ด / แผนภาพ]
+
+time.sleep(3) block thread ที่กำลังรัน function นั้นอยู่เต็ม 3 วินาที
+โค้ดอธิบายไว้อย่างถูกต้องว่า FastAPI นำ endpoint แบบ def ไปทำใน thread pool
+จึงไม่ควรสรุปง่ายเกินไปว่า “ทำให้ทั้ง server หยุดทั้งหมด” แต่ request นี้ยังครอบครอง
+worker thread ระหว่างรอ
+
+4.3 /async-delay — cooperative asynchronous wait
+------------------------------------------------
+
+[โค้ด / แผนภาพ : python]
+@app.get("/async-delay")
+async def async_delay():
+    await asyncio.sleep(3)
+[จบโค้ด / แผนภาพ]
+
+Request นี้ยังใช้เวลาประมาณ 3 วินาทีเหมือนเดิม แต่ระหว่าง sleep coroutine คืน control
+ให้ event loop เพื่อดูแลงานอื่นได้
+
+[โค้ด / แผนภาพ : text]
+เวลา request เดียว:
+/sync-delay  ≈ 3 วินาที
+/async-delay ≈ 3 วินาที
+
+ความต่างสำคัญ:
+time.sleep       -> block thread
+await async sleep -> ยอมให้ event loop ไปทำงานอื่น
+[จบโค้ด / แผนภาพ]
+
+async def ไม่ได้ทำให้ทุกอย่างเร็วเอง ถ้าใส่ blocking code ลงใน async def
+ก็ยังสร้างปัญหาได้
+
+4.4 /concurrent-tasks — asyncio.gather()
+----------------------------------------
+
+Helper ภายใน endpoint จำลอง 3 API:
+
+- งาน: API_Alpha
+  เวลารอ: 2 วินาที
+  ผลที่ return: Data from API_Alpha
+
+- งาน: API_Beta
+  เวลารอ: 3 วินาที
+  ผลที่ return: Data from API_Beta
+
+- งาน: API_Gamma
+  เวลารอ: 1 วินาที
+  ผลที่ return: Data from API_Gamma
+
+
+[โค้ด / แผนภาพ : python]
+results = await asyncio.gather(
+    fetch_data_from_api("API_Alpha", 2),
+    fetch_data_from_api("API_Beta", 3),
+    fetch_data_from_api("API_Gamma", 1)
+)
+[จบโค้ด / แผนภาพ]
+
+ถ้ารอทีละงานจะเป็น 2 + 3 + 1 = 6 วินาที แต่ gather() ทำให้ทั้งสามคืบหน้าพร้อมกัน
+จึงรอประมาณงานช้าที่สุดคือ 3 วินาที
+
+สิ่งที่มักออกสอบ:
+
+- ลำดับ เสร็จ: Gamma, Alpha, Beta
+- ลำดับใน results: Alpha, Beta, Gamma ตามลำดับ argument ของ gather()
+- นี่คือ concurrency ของงานรอ I/O ไม่ควรเรียกว่าใช้ CPU คำนวณสามงานแบบ parallel
+  โดยอัตโนมัติ
+
+----------------------------------------------------------------
+
+Part C — เรียก External API ด้วย HTTPX
+======================================
+
+5. Week5/fastapi_async_external_api_lab.py
+------------------------------------------
+
+5.1 บริการภายนอกและข้อมูลสำรอง
+------------------------------
+
+- ชื่อ: Cat Fact
+  URL ในโค้ด: https://catfact.ninja/fact
+  Mock data เมื่อเรียกไม่ได้: fact เรื่องแมวนอน 70% ของชีวิต
+
+- ชื่อ: Bitcoin Price
+  URL ในโค้ด: https://api.coindesk.com/v1/bpi/currentprice.json
+  Mock data เมื่อเรียกไม่ได้: USD rate 95,430.00
+
+- ชื่อ: Joke
+  URL ในโค้ด: https://official-joke-api.appspot.com/random_joke
+  Mock data เมื่อเรียกไม่ได้: มุก dark mode / bugs
+
+
+ผลจากบริการจริงเปลี่ยนได้ และบริการอาจ timeout, rate-limit, เปลี่ยนรูปแบบ หรือเข้าไม่ได้
+โค้ดจึงมี fallback เพื่อให้ endpoint ของเรายังตอบได้
+
+5.2 Endpoint ทั้งหมด
+--------------------
+
+- Method: GET
+  Path: /single-fetch
+  พฤติกรรม: เรียก Cat Fact หนึ่งแหล่ง
+
+- Method: GET
+  Path: /sequential-fetch
+  พฤติกรรม: เรียก Cat → Bitcoin → Joke ทีละตัว
+
+- Method: GET
+  Path: /concurrent-fetch
+  พฤติกรรม: เรียกทั้งสามพร้อมกันด้วย gather()
+
+
+5.3 รูปแบบ HTTPX ที่ต้องจำ
+--------------------------
+
+[โค้ด / แผนภาพ : python]
+async with httpx.AsyncClient() as client:
+    response = await client.get(url, timeout=3.0)
+    response.raise_for_status()
+    data = response.json()
+[จบโค้ด / แผนภาพ]
+
+- บรรทัด: AsyncClient()
+  หน้าที่: client สำหรับ network I/O แบบ async
+
+- บรรทัด: async with
+  หน้าที่: ปิด client/connection resource เมื่อจบ block
+
+- บรรทัด: await client.get(...)
+  หน้าที่: ส่ง GET โดยไม่ block event loop ระหว่างรอ network
+
+- บรรทัด: timeout=3.0
+  หน้าที่: รอ request นั้นสูงสุด 3 วินาที
+
+- บรรทัด: raise_for_status()
+  หน้าที่: เปลี่ยน HTTP error status เป็น exception
+
+- บรรทัด: response.json()
+  หน้าที่: แปลง JSON response เป็น Python object
+
+
+5.4 /single-fetch
+-----------------
+
+เมื่อ Cat Fact สำเร็จ:
+
+[โค้ด / แผนภาพ : json]
+{
+  "status": "Success",
+  "elapsed_seconds": 0.42,
+  "source": "CatFact Ninja",
+  "fallback_activated": false,
+  "fetched_payload": {"fact": "...", "length": 123}
+}
+[จบโค้ด / แผนภาพ]
+
+เมื่อเกิด httpx.HTTPError:
+
+- server print network warning
+- ใช้ MOCK_CAT_FACT
+- fallback_activated เป็น true
+- endpoint ยังคืน status: "Success" ตามโค้ด เพราะ success ในที่นี้หมายถึง endpoint
+  ของเรายังตอบได้ ไม่ได้แปลว่า upstream สำเร็จ
+
+5.5 /sequential-fetch
+---------------------
+
+ลำดับการรอจริง:
+
+[โค้ด / แผนภาพ : text]
+Cat เสร็จ/ล้มเหลว
+       |
+       v
+Bitcoin เสร็จ/ล้มเหลว
+       |
+       v
+Joke เสร็จ/ล้มเหลว
+       |
+       v
+return ผลรวม
+[จบโค้ด / แผนภาพ]
+
+แม้ใช้ await และไม่ block event loop แต่ภายใน request นี้ยัง รอแบบเรียงลำดับ เพราะ
+request ถัดไปเริ่มหลัง request ก่อนหน้าจบ
+
+กรณีเลวร้ายที่ทั้งสามรอจน timeout 3 วินาที เวลารวมอาจเข้าใกล้ 9 วินาทีบวก overhead
+ไม่ใช่รับประกันว่าจะเป็น 3 วินาที
+
+5.6 /concurrent-fetch
+---------------------
+
+Helper fetch_safely(...) จัดการความล้มเหลวของแต่ละ API เอง และคืน tuple:
+
+[โค้ด / แผนภาพ : python]
+(data, fallback_was_used)
+[จบโค้ด / แผนภาพ]
+
+จากนั้นสร้าง coroutine 3 ตัวและรอพร้อมกัน:
+
+[โค้ด / แผนภาพ : python]
+cat_res, btc_res, joke_res = await asyncio.gather(
+    cat_task, btc_task, joke_task
+)
+[จบโค้ด / แผนภาพ]
+
+หากทั้งสาม timeout ใกล้ 3 วินาทีพร้อมกัน เวลารวมโดยแนวคิดจะใกล้ timeout ที่ช้าที่สุด
+ไม่ใช่ 9 วินาที
+
+[โค้ด / แผนภาพ : text]
+Sequential: Cat ----> BTC ----> Joke ----> return
+Concurrent: Cat  ----------------->
+            BTC  -----------------> return เมื่อครบ
+            Joke ----------------->
+[จบโค้ด / แผนภาพ]
+
+fallback_active = cat_fallback or btc_fallback or joke_fallback จึงเป็น true
+ถ้ามีอย่างน้อยหนึ่งบริการใช้ mock
+
+5.7 จุดสังเกตจากโค้ดจริง
+------------------------
+
+- HTTPException ถูก import แต่ไม่ได้ใช้
+- API ภายนอกและค่าที่ตอบไม่แน่นอน จึงไม่ควรจำ expected output แบบตายตัว
+- elapsed_seconds รวม network latency และ overhead จริง
+- asyncio.gather() ช่วยเมื่อแต่ละงานเป็นอิสระต่อกัน
+- การจับ error ภายใน fetch_safely() ป้องกัน API หนึ่งล้มแล้วทำให้ batch ทั้งหมดพัง
+
+----------------------------------------------------------------
+
+Part D — WebSocket Chat
+=======================
+
+6. HTTP กับ WebSocket ต่างกันอย่างไร
+------------------------------------
+
+- ประเด็น: รูปแบบ
+  HTTP endpoint: request → response
+  WebSocket: connection สองทางเปิดค้างไว้
+
+- ประเด็น: เหมาะกับ
+  HTTP endpoint: อ่าน/ส่งข้อมูลเป็นครั้ง ๆ
+  WebSocket: chat, dashboard, game real-time
+
+- ประเด็น: FastAPI decorator
+  HTTP endpoint: @app.get, @app.post
+  WebSocket: @app.websocket
+
+- ประเด็น: รับข้อมูล
+  HTTP endpoint: parameter/body
+  WebSocket: receive_text() หรือ receive_json()
+
+- ประเด็น: ส่งข้อมูล
+  HTTP endpoint: return response
+  WebSocket: send_text() หรือ send_json()
+
+- ประเด็น: URL scheme
+  HTTP endpoint: http://
+  WebSocket: ws://
+
+
+7. สถาปัตยกรรม Chat
+-------------------
+
+[โค้ด / แผนภาพ : text]
+Browser ของ client.py (HTTP :8001)
+        | WebSocket ws://SERVER:8088/ws/{student_id}
+        |
+        v
+chat-hello/main.py (:8088)
+ConnectionManager.active_connections
+        |
+        +---- broadcast ----> Browser client.py
+        |
+        +---- broadcast ----> Browser client2.py
+        |
+        +---- broadcast ----> client อื่นทุกคน
+
+Browser ของ client2.py มาจาก local HTTP :8002
+[จบโค้ด / แผนภาพ]
+
+ต้องแยกให้ชัดว่า client แต่ละไฟล์เป็น ทั้ง:
+
+1. Local FastAPI HTTP server สำหรับส่งหน้า HTML ให้ browser
+2. หน้า JavaScript ที่เปิด WebSocket ไปยัง central server port 8088
+
+8. Week5/chat-hello/main.py — Central Chat Server
+-------------------------------------------------
+
+8.1 Port และ Endpoint
+---------------------
+
+คำสั่งที่เขียนในไฟล์:
+
+[โค้ด / แผนภาพ : bash]
+uvicorn main:app --host 0.0.0.0 --port 8088 --reload
+[จบโค้ด / แผนภาพ]
+
+- Protocol: HTTP GET
+  Path: /
+  หน้าที่: ดูสถานะ server และรายชื่อ ID ที่เชื่อมอยู่
+
+- Protocol: WebSocket
+  Path: /ws/{student_id}
+  หน้าที่: ช่อง chat ของ student ID นั้น
+
+
+8.2 ConnectionManager
+---------------------
+
+[โค้ด / แผนภาพ : python]
+self.active_connections: Dict[str, WebSocket] = {}
+[จบโค้ด / แผนภาพ]
+
+เก็บ connection โดยใช้ student_id เป็น key:
+
+[โค้ด / แผนภาพ : text]
+{
+  "6710301001": WebSocket-A,
+  "6710301002": WebSocket-B
+}
+[จบโค้ด / แผนภาพ]
+
+- connect() เรียก await websocket.accept() แล้วเก็บ connection
+- disconnect() ลบ key ออกจาก dictionary
+- broadcast() วนทุก connection และ await connection.send_text(message)
+
+8.3 Flow เมื่อเข้าแชต
+---------------------
+
+[โค้ด / แผนภาพ : text]
+Browser connect /ws/6710301001
+          |
+          v
+server accept connection
+          |
+          v
+บันทึก active_connections["6710301001"]
+          |
+          v
+broadcast "เชื่อมต่อเข้าสู่ระบบ" ให้ทุกคน
+[จบโค้ด / แผนภาพ]
+
+8.4 Flow เมื่อส่งข้อความ
+------------------------
+
+[โค้ด / แผนภาพ : python]
+data = await websocket.receive_text()
+await manager.broadcast(f"[{student_id}]: {data}")
+[จบโค้ด / แผนภาพ]
+
+ผู้ส่งจะได้รับข้อความ broadcast กลับด้วย เพราะ connection ของผู้ส่งก็อยู่ใน dictionary
+
+8.5 Flow เมื่อตัดการเชื่อมต่อ
+-----------------------------
+
+เมื่อ receive_text() เจอ WebSocketDisconnect:
+
+1. ลบ student ID
+2. broadcast ข้อความออกจากระบบให้คนที่ยังอยู่
+
+8.6 ข้อจำกัดที่ควรรู้
+---------------------
+
+- ถ้าสอง browser ใช้ student_id ซ้ำ connection ใหม่จะเขียนทับค่าเดิมใน dictionary แต่
+  connection เก่าอาจยังเปิดอยู่และไม่ได้อยู่ในชุด broadcast แล้ว
+- broadcast() ไม่มี try/except ราย connection ถ้าการส่งไป connection หนึ่งล้ม
+  อาจทำให้รอบ broadcast นั้นเกิด exception
+- ข้อมูลอยู่ใน memory เท่านั้น restart server แล้วรายชื่อหาย
+- ไม่มี authentication และไม่มีฐานข้อมูลประวัติข้อความ
+- asyncio ถูก import แต่ไม่ได้เรียกใช้โดยตรงในไฟล์นี้
+
+9. chat-hello/client.py และ client2.py
+--------------------------------------
+
+9.1 สิ่งที่ทำเหมือนกัน
+----------------------
+
+ทั้งคู่:
+
+- รับ student_id จาก Terminal
+- รับ IP central server หรือใช้ localhost
+- สร้างหน้า HTML/CSS/JavaScript
+- JavaScript ต่อ ws://{server_ip}:8088/ws/{student_id}
+- ws.onmessage เพิ่มข้อความใน <div id="messages">
+- sendMessage() เรียก ws.send(input.value)
+- เปิด browser อัตโนมัติ
+
+9.2 สิ่งที่ต่างกัน
+------------------
+
+- ไฟล์: client.py
+  Local HTTP port จริง: 8001
+  Browser URL จริง: http://127.0.0.1:8001
+  WebSocket port จริง: 8088
+
+- ไฟล์: client2.py
+  Local HTTP port จริง: 8002
+  Browser URL จริง: http://127.0.0.1:8002
+  WebSocket port จริง: 8088
+
+
+9.3 ความไม่สอดคล้องของข้อความแสดง port
+--------------------------------------
+
+ใน client2.py มีจุดที่ต้องสังเกต:
+
+[โค้ด / แผนภาพ : html]
+เชื่อมต่อไปยัง Server: ws://{server_ip}:8000/ws/{student_id}
+[จบโค้ด / แผนภาพ]
+
+แต่ JavaScript เชื่อมจริงด้วย:
+
+[โค้ด / แผนภาพ : javascript]
+new WebSocket("ws://{server_ip}:8088/ws/{student_id}")
+[จบโค้ด / แผนภาพ]
+
+ดังนั้น ข้อความบนหน้าจอแสดง port 8000 แต่ connection จริงใช้ port 8088
+คู่มือนี้บันทึกตามโค้ดจริงและไม่ได้แก้ Python file
+
+9.4 Expected behavior
+---------------------
+
+เมื่อเปิด client แรก:
+
+[โค้ด / แผนภาพ : text]
+[System]: รหัสนักศึกษา 6710301001 เชื่อมต่อเข้าสู่ระบบ
+[จบโค้ด / แผนภาพ]
+
+เมื่อ client สองเข้ามา ทุกหน้าจอที่เชื่อมอยู่ควรเห็น system message ของ client สอง
+จากนั้นถ้า client แรกส่ง Hello ทุกคนควรเห็น:
+
+[โค้ด / แผนภาพ : text]
+[6710301001]: Hello
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+Part E — Rocket Real-time System
+================================
+
+10. สถาปัตยกรรม Rocket
+----------------------
+
+[โค้ด / แผนภาพ : text]
+student.py (:8002)          student2.py (:8003)
+Browser Controller A        Browser Controller B
+       | CONTROL JSON              | CONTROL JSON
+       +------------ WebSocket :8088 ------------+
+                                                   v
+                                         rocket/main.py
+                                   RocketSpaceManager + state
+                                                   |
+                           INIT / SPAWN / UPDATE / DESPAWN
+                                                   v
+                                       dashboard.py (:8001)
+                                      Browser Canvas 800x600
+[จบโค้ด / แผนภาพ]
+
+Port 8001/8002/8003 เป็น local HTTP servers ที่ส่งหน้าเว็บ ส่วน port 8088 เป็น WebSocket
+central server
+
+11. Week5/rocket/main.py — Rocket Central Server
+------------------------------------------------
+
+11.1 ขอบเขตสนามและ State
+------------------------
+
+[โค้ด / แผนภาพ : python]
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 600
+[จบโค้ด / แผนภาพ]
+
+Manager เก็บ dictionary สองชุด:
+
+- ตัวแปร: connections
+  เก็บอะไร: WebSocket ของทุก client รวม dashboard
+
+- ตัวแปร: rockets
+  เก็บอะไร: state ของจรวดจริง ไม่รวม dashboard
+
+
+State ของจรวดหนึ่งลำ:
+
+[โค้ด / แผนภาพ : json]
+{
+  "x": 400.0,
+  "y": 300.0,
+  "angle": 0,
+  "color": "hsl(..., 80%, 60%)"
+}
+[จบโค้ด / แผนภาพ]
+
+ตำแหน่งเริ่มต้นคือกึ่งกลางสนาม (400, 300) สีมาจาก hash(rocket_id) % 360
+
+11.2 Endpoint
+-------------
+
+[โค้ด / แผนภาพ : text]
+WebSocket /ws/{client_id}
+[จบโค้ด / แผนภาพ]
+
+ถ้า client_id == "DASHBOARD" server มองว่าเป็น dashboard และไม่สร้างจรวดให้ ถ้าเป็น ID
+อื่นจะสร้าง state จรวด
+
+11.3 Message protocol
+---------------------
+
+- type: INIT
+  ทิศทาง: server → client ที่เพิ่งต่อ
+  เกิดเมื่อ: connect สำเร็จ
+  field สำคัญ: rockets, bounds
+
+- type: SPAWN
+  ทิศทาง: server → ทุก client
+  เกิดเมื่อ: controller ใหม่เข้า
+  field สำคัญ: id, rocket
+
+- type: CONTROL
+  ทิศทาง: controller → server
+  เกิดเมื่อ: กดปุ่ม/ลูกศร
+  field สำคัญ: action
+
+- type: UPDATE
+  ทิศทาง: server → ทุก client
+  เกิดเมื่อ: server เปลี่ยน state
+  field สำคัญ: id, rocket
+
+- type: DESPAWN
+  ทิศทาง: server → ทุก client
+  เกิดเมื่อ: client disconnect
+  field สำคัญ: id
+
+
+ตัวอย่าง CONTROL:
+
+[โค้ด / แผนภาพ : json]
+{"type": "CONTROL", "action": "ROTATE_LEFT"}
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่าง UPDATE:
+
+[โค้ด / แผนภาพ : json]
+{
+  "type": "UPDATE",
+  "id": "Rocket_101",
+  "rocket": {"x": 408.0, "y": 300.0, "angle": 0, "color": "hsl(...)"}
+}
+[จบโค้ด / แผนภาพ]
+
+11.4 การหมุน
+------------
+
+[โค้ด / แผนภาพ : python]
+ROTATE_LEFT  -> angle = (angle - 15) % 360
+ROTATE_RIGHT -> angle = (angle + 15) % 360
+[จบโค้ด / แผนภาพ]
+
+แต่ละครั้งหมุน 15 องศา และ % 360 ทำให้มุมอยู่ในรอบ 0–359
+
+ตัวอย่าง:
+
+[โค้ด / แผนภาพ : text]
+เริ่ม 0°
+กดซ้าย -> 345°
+กดขวา -> 0°
+[จบโค้ด / แผนภาพ]
+
+11.5 การเคลื่อนที่ด้วย THRUST
+-----------------------------
+
+[โค้ด / แผนภาพ : python]
+rad = math.radians(rocket["angle"])
+new_x = rocket["x"] + 8 * math.cos(rad)
+new_y = rocket["y"] + 8 * math.sin(rad)
+[จบโค้ด / แผนภาพ]
+
+- speed ต่อการกดหนึ่งครั้ง = 8 pixel
+- 0° เพิ่ม x จึงเคลื่อนไปทางขวา
+- 90° เพิ่ม y บน Canvas ซึ่งโดยพิกัดหน้าจอคือเคลื่อนลง
+- 180° ลด x คือไปซ้าย
+- 270° ลด y คือขึ้น
+
+11.6 ล็อกขอบสนาม
+----------------
+
+[โค้ด / แผนภาพ : python]
+x = max(20, min(780, new_x))
+y = max(20, min(580, new_y))
+[จบโค้ด / แผนภาพ]
+
+Padding 20 pixel ป้องกันตัวจรวดหลุดจากสนาม 800×600
+
+11.7 Broadcast และ disconnect
+-----------------------------
+
+broadcast() ใช้ list(self.connections.values()) เพื่อ snapshot ค่า และจับ exception ราย
+connection แล้ว pass จึงทนต่อ connection ที่ส่งไม่สำเร็จได้ดีกว่า chat version แต่
+connection เสียไม่ได้ถูกลบใน method นี้
+
+เมื่อ controller หลุด:
+
+1. ลบจาก connections
+2. ลบจาก rockets
+3. broadcast DESPAWN
+
+ถ้า dashboard หลุด จะไม่มี rocket state ชื่อ DASHBOARD ให้ลบ แต่ server ยัง broadcast
+DESPAWN ID DASHBOARD; dashboard อื่นที่รับ event นี้ก็เพียงพยายามลบ key ที่ปกติไม่มี
+
+11.8 ข้อควรระวัง input
+----------------------
+
+โค้ดอ่าน data["type"] และ data["action"] ตรง ๆ ถ้า client ส่ง JSON ที่ไม่มี key เหล่านี้
+อาจเกิด KeyError ซึ่งไม่ได้ถูกจับโดย except WebSocketDisconnect
+
+12. Week5/rocket/dashboard.py
+-----------------------------
+
+12.1 หน้าที่
+------------
+
+ไฟล์นี้เปิด local FastAPI ที่ port 8001 ส่งหน้า Canvas และ WebSocket ต่อ central server
+ด้วย ID พิเศษ:
+
+[โค้ด / แผนภาพ : javascript]
+new WebSocket("ws://{server_ip}:8088/ws/DASHBOARD")
+[จบโค้ด / แผนภาพ]
+
+12.2 การจัดการ event
+--------------------
+
+[โค้ด / แผนภาพ : javascript]
+INIT              -> Object.assign(rockets, data.rockets)
+SPAWN หรือ UPDATE -> rockets[data.id] = data.rocket
+DESPAWN           -> delete rockets[data.id]
+[จบโค้ด / แผนภาพ]
+
+Counter ใช้ Object.keys(rockets).length จึงนับจำนวน state จรวดบน browser
+
+12.3 การวาด
+------------
+
+- Canvas ขนาด 800×600
+- drawGrid(50) วาด grid ทุก 50 pixel
+- drawRocket(...) translate ไปตำแหน่งและ rotate ตามมุม
+- เขียน ID ไว้เหนือจรวด
+- requestAnimationFrame(render) วาดซ้ำตามรอบ render ของ browser
+
+WebSocket event มีหน้าที่อัปเดต state ส่วน animation loop มีหน้าที่วาด state ล่าสุด
+ทั้งสองส่วนจึงแยกกัน
+
+12.4 Port
+------------
+
+[โค้ด / แผนภาพ : text]
+Local dashboard HTTP: http://127.0.0.1:8001
+Central WebSocket:     ws://SERVER_IP:8088/ws/DASHBOARD
+[จบโค้ด / แผนภาพ]
+
+13. rocket/student.py และ student2.py
+-------------------------------------
+
+13.1 สิ่งที่เหมือนกัน
+---------------------
+
+- รับ ID/ชื่อจรวด หรือ default Rocket_101
+- รับ IP server หรือ default localhost
+- สร้างหน้า controller
+- ปุ่มซ้ายส่ง ROTATE_LEFT
+- ปุ่มขวาส่ง ROTATE_RIGHT
+- ปุ่ม THRUST ส่ง THRUST
+- Keyboard ArrowLeft/ArrowRight/ArrowUp ทำงานเหมือนปุ่ม
+- ส่งเฉพาะเมื่อ ws.readyState === WebSocket.OPEN
+
+13.2 สิ่งที่ต่างกัน
+-------------------
+
+- ไฟล์: student.py
+  Local HTTP port จริง: 8002
+  URL ที่เปิดจริง: http://127.0.0.1:8002
+  WebSocket server: SERVER:8088
+
+- ไฟล์: student2.py
+  Local HTTP port จริง: 8003
+  URL ที่เปิดจริง: http://127.0.0.1:8003
+  WebSocket server: SERVER:8088
+
+
+สองไฟล์เกือบเหมือนกัน จุดประสงค์คือเปิด controller สองหน้าบนเครื่องเดียวโดยไม่ชน local
+port
+
+13.3 ความไม่สอดคล้องของ comment เรื่อง port
+-------------------------------------------
+
+ใน student.py comment เขียนว่า “เปิดเบราว์เซอร์ไปที่ Port 8001” แต่ code
+เปิดและรันจริงที่ 8002
+
+ใน student2.py comment ก็เขียนว่า “เปิดเบราว์เซอร์ไปที่ Port 8001” แต่ code
+เปิดและรันจริงที่ 8003
+
+ให้เชื่อค่าที่ถูกส่งเข้า webbrowser.open(...) และ uvicorn.run(..., port=...)
+เป็นพฤติกรรมจริง คู่มือนี้ไม่แก้ source code
+
+13.4 Expected behavior
+----------------------
+
+1. เปิด dashboard: Active Rockets = 0
+2. เปิด student.py: จรวดแรกเกิดกลางสนาม และ counter = 1
+3. เปิด student2.py ด้วย ID ไม่ซ้ำ: จรวดที่สองเกิด และ counter = 2
+4. กด Left/Right: จรวด ID นั้นหมุนครั้งละ 15°
+5. กด THRUST: จรวดขยับครั้งละ 8 pixel ตามมุม
+6. ปิด controller: จรวดนั้นหายจาก dashboard หลัง DESPAWN
+
+----------------------------------------------------------------
+
+14. ตาราง Port และ Endpoint ทั้ง Week 5
+---------------------------------------
+
+14.1 HTTP/FastAPI Labs
+----------------------
+
+ทั้งสามไฟล์พื้นฐานต้องรัน ทีละไฟล์ หากใช้ port 8000 เดียวกัน
+
+- App: fastapi_basic_lab.py
+  Port ตามคำสั่ง: 8000 (Uvicorn default)
+  Endpoints: /, /items/{item_id}, /users, /register/student, /docs
+
+- App: fastapi_async_basic_lab.py
+  Port ตามคำสั่ง: 8000
+  Endpoints: /sync-delay, /async-delay, /concurrent-tasks, /docs
+
+- App: fastapi_async_external_api_lab.py
+  Port ตามคำสั่ง: 8000
+  Endpoints: /single-fetch, /sequential-fetch, /concurrent-fetch, /docs
+
+
+14.2 Chat
+------------
+
+- Process: chat-hello/main.py
+  HTTP port: 8088 และมี GET /
+  WebSocket target: /ws/{student_id} บน 8088
+
+- Process: chat-hello/client.py
+  HTTP port: 8001
+  WebSocket target: central server 8088
+
+- Process: chat-hello/client2.py
+  HTTP port: 8002
+  WebSocket target: central server 8088
+
+
+14.3 Rocket
+------------
+
+- Process: rocket/main.py
+  HTTP port: ไม่มี HTTP route ในโค้ด; Uvicorn ฟัง 8088 เพื่อ WebSocket
+  WebSocket target: /ws/{client_id}
+
+- Process: rocket/dashboard.py
+  HTTP port: 8001
+  WebSocket target: /ws/DASHBOARD บน 8088
+
+- Process: rocket/student.py
+  HTTP port: 8002
+  WebSocket target: /ws/{student_id} บน 8088
+
+- Process: rocket/student2.py
+  HTTP port: 8003
+  WebSocket target: /ws/{student_id} บน 8088
+
+
+Chat และ Rocket central server ใช้ port 8088 เหมือนกัน จึงไม่สามารถเปิดทั้งสอง server บน
+IP/เครื่องเดียวกันพร้อมกันที่ port เดิมได้ ควรรันแยกแล็บ
+
+----------------------------------------------------------------
+
+15. วิธีติดตั้งและรัน
+---------------------
+
+15.1 ติดตั้ง package
+--------------------
+
+จาก repository root:
+
+[โค้ด / แผนภาพ : bash]
+python -m pip install fastapi uvicorn httpx
+[จบโค้ด / แผนภาพ]
+
+webbrowser, asyncio, time, typing และ math มาจาก Python standard library ไม่ต้อง pip
+install
+
+15.2 รัน FastAPI Basic Lab
+--------------------------
+
+Terminal:
+
+[โค้ด / แผนภาพ : bash]
+cd Week5
+python -m uvicorn fastapi_basic_lab:app --reload
+[จบโค้ด / แผนภาพ]
+
+เปิด:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8000/
+http://127.0.0.1:8000/docs
+[จบโค้ด / แผนภาพ]
+
+ทดสอบ URL ตัวอย่าง:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8000/items/123
+http://127.0.0.1:8000/users?username=Alice&age=21
+[จบโค้ด / แผนภาพ]
+
+POST ให้ใช้ /docs แล้วกด Try it out ที่ /register/student
+
+15.3 รัน Async Basic Lab
+------------------------
+
+หยุด server เดิมด้วย Ctrl+C ก่อน เพราะใช้ port 8000 เหมือนกัน:
+
+[โค้ด / แผนภาพ : bash]
+cd Week5
+python -m uvicorn fastapi_async_basic_lab:app --reload --port 8000
+[จบโค้ด / แผนภาพ]
+
+เปิด:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8000/sync-delay
+http://127.0.0.1:8000/async-delay
+http://127.0.0.1:8000/concurrent-tasks
+[จบโค้ด / แผนภาพ]
+
+15.4 รัน External API Lab
+-------------------------
+
+[โค้ด / แผนภาพ : bash]
+cd Week5
+python -m uvicorn fastapi_async_external_api_lab:app --reload --port 8000
+[จบโค้ด / แผนภาพ]
+
+เปิด http://127.0.0.1:8000/docs แล้วทดลองทั้ง 3 endpoint เปรียบเทียบ elapsed_seconds และ
+fallback_activated
+
+15.5 รัน Chat Lab
+-----------------
+
+ใช้ 3 Terminal
+
+Terminal 1 — central server:
+
+[โค้ด / แผนภาพ : bash]
+cd Week5/chat-hello
+python -m uvicorn main:app --host 0.0.0.0 --port 8088 --reload
+[จบโค้ด / แผนภาพ]
+
+Terminal 2 — client แรก:
+
+[โค้ด / แผนภาพ : bash]
+cd Week5/chat-hello
+python client.py
+[จบโค้ด / แผนภาพ]
+
+Terminal 3 — client ที่สอง:
+
+[โค้ด / แผนภาพ : bash]
+cd Week5/chat-hello
+python client2.py
+[จบโค้ด / แผนภาพ]
+
+ตอน prompt:
+
+- กรอก student ID ไม่ซ้ำกัน
+- ถ้าทุก process อยู่เครื่องเดียวกัน กด Enter เพื่อใช้ localhost
+- ถ้า central server อยู่เครื่องอื่น ให้กรอก IP เครื่อง server และตรวจ firewall/network
+
+ตรวจสถานะ central server:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8088/
+[จบโค้ด / แผนภาพ]
+
+15.6 รัน Rocket Lab
+-------------------
+
+หยุด Chat central server ก่อน เพราะชน port 8088 จากนั้นใช้ 4 Terminal
+
+Terminal 1 — Rocket central server:
+
+[โค้ด / แผนภาพ : bash]
+cd Week5/rocket
+python -m uvicorn main:app --host 0.0.0.0 --port 8088 --reload
+[จบโค้ด / แผนภาพ]
+
+Terminal 2 — Dashboard:
+
+[โค้ด / แผนภาพ : bash]
+cd Week5/rocket
+python dashboard.py
+[จบโค้ด / แผนภาพ]
+
+Terminal 3 — Controller 1:
+
+[โค้ด / แผนภาพ : bash]
+cd Week5/rocket
+python student.py
+[จบโค้ด / แผนภาพ]
+
+Terminal 4 — Controller 2:
+
+[โค้ด / แผนภาพ : bash]
+cd Week5/rocket
+python student2.py
+[จบโค้ด / แผนภาพ]
+
+กรอก ID ของ controller ให้ไม่ซ้ำกัน เช่น Rocket_A และ Rocket_B
+
+15.7 ตรวจ syntax โดยไม่แก้ไฟล์
+------------------------------
+
+จาก repository root:
+
+[โค้ด / แผนภาพ : bash]
+python -m py_compile Week5/fastapi_basic_lab.py Week5/fastapi_async_basic_lab.py Week5/fastapi_async_external_api_lab.py Week5/chat-hello/main.py Week5/chat-hello/client.py Week5/chat-hello/client2.py Week5/rocket/main.py Week5/rocket/dashboard.py Week5/rocket/student.py Week5/rocket/student2.py
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+16. Pitfalls และ Debug Checklist
+--------------------------------
+
+- อาการ: ModuleNotFoundError: fastapi
+  สาเหตุที่เป็นไปได้: ยังไม่ได้ติดตั้ง
+  วิธีตรวจ/แนวทาง: python -m pip install fastapi uvicorn
+
+- อาการ: ModuleNotFoundError: httpx
+  สาเหตุที่เป็นไปได้: ขาด HTTPX
+  วิธีตรวจ/แนวทาง: python -m pip install httpx
+
+- อาการ: Address already in use
+  สาเหตุที่เป็นไปได้: port 8000/8001/8002/8088 ถูกใช้อยู่
+  วิธีตรวจ/แนวทาง: หยุด process แล็บเดิมก่อน
+
+- อาการ: /items/abc ได้ error
+  สาเหตุที่เป็นไปได้: item_id ต้องเป็น int
+  วิธีตรวจ/แนวทาง: ใช้ /items/123
+
+- อาการ: /users ได้ validation error
+  สาเหตุที่เป็นไปได้: ขาด username
+  วิธีตรวจ/แนวทาง: เพิ่ม ?username=Alice
+
+- อาการ: POST register ไม่ผ่าน
+  สาเหตุที่เป็นไปได้: JSON ขาด field หรือ type ผิด
+  วิธีตรวจ/แนวทาง: ตรวจ student_id, nickname, gpa
+
+- อาการ: External API ได้ mock
+  สาเหตุที่เป็นไปได้: upstream ล้ม/timeout/rate-limit
+  วิธีตรวจ/แนวทาง: ดู log และ fallback_activated
+
+- อาการ: Sequential บางครั้งเร็วกว่า/ช้ากว่าที่เดา
+  สาเหตุที่เป็นไปได้: network latency จริงไม่คงที่
+  วิธีตรวจ/แนวทาง: ทดลองหลายรอบและดู elapsed
+
+- อาการ: Browser chat เปิดแต่ไม่มีข้อความ
+  สาเหตุที่เป็นไปได้: central server ไม่เปิด/IP ผิด/port ถูก block
+  วิธีตรวจ/แนวทาง: ตรวจ server 8088 และ URL WebSocket
+
+- อาการ: client2.py แสดง :8000
+  สาเหตุที่เป็นไปได้: ข้อความ HTML ไม่ตรง JavaScript
+  วิธีตรวจ/แนวทาง: connection จริงใน JS ใช้ 8088
+
+- อาการ: เปิด client สองตัวด้วย ID เดียว
+  สาเหตุที่เป็นไปได้: dictionary key ถูกเขียนทับ
+  วิธีตรวจ/แนวทาง: ใช้ ID ไม่ซ้ำ
+
+- อาการ: Dashboard ไม่มีจรวด
+  สาเหตุที่เป็นไปได้: Rocket server/controller ไม่เชื่อม
+  วิธีตรวจ/แนวทาง: เปิด server → dashboard → controller
+
+- อาการ: กดปุ่มแล้วไม่ขยับ
+  สาเหตุที่เป็นไปได้: WebSocket ยังไม่ OPEN หรือ server ไม่ตอบ
+  วิธีตรวจ/แนวทาง: ตรวจ browser console และ central server
+
+- อาการ: จรวดเดิน “ลง” ที่ 90°
+  สาเหตุที่เป็นไปได้: Canvas เพิ่มค่า y ลงด้านล่าง
+  วิธีตรวจ/แนวทาง: เป็นระบบพิกัดหน้าจอปกติ
+
+- อาการ: จรวดหยุดที่ขอบ
+  สาเหตุที่เป็นไปได้: server clamp padding 20
+  วิธีตรวจ/แนวทาง: เป็น behavior ที่ตั้งใจไว้
+
+- อาการ: Dashboard เปิด port 8001 ไม่ได้
+  สาเหตุที่เป็นไปได้: chat client.py หรือ app อื่นยังใช้ 8001
+  วิธีตรวจ/แนวทาง: ปิดแล็บเดิมก่อน
+
+- อาการ: Student เปิด port 8002 ไม่ได้
+  สาเหตุที่เป็นไปได้: chat client2.py หรือ app อื่นยังใช้ 8002
+  วิธีตรวจ/แนวทาง: ปิดแล็บเดิมก่อน
+
+
+Port display inconsistencies ที่ต้องจำ
+--------------------------------------
+
+1. chat-hello/client2.py: ข้อความหน้าเว็บบอก WS port 8000 แต่ JavaScript ใช้ 8088 จริง
+2. rocket/student.py: comment บอก browser port 8001 แต่ code ใช้ 8002 จริง
+3. rocket/student2.py: comment บอก browser port 8001 แต่ code ใช้ 8003 จริง
+
+อย่าแก้โค้ดเพียงเพราะคู่มือชี้จุดนี้ หากเป็นงานส่งควรตรวจ requirement ของอาจารย์ก่อน
+
+----------------------------------------------------------------
+
+17. ตารางเปรียบเทียบแนวคิดสำคัญ
+-------------------------------
+
+17.1 def กับ async def
+----------------------
+
+- ประเด็น: object/function
+  def: function ปกติ
+  async def: coroutine function
+
+- ประเด็น: ใช้ await ได้ไหม
+  def: ไม่ได้
+  async def: ได้
+
+- ประเด็น: FastAPI execution
+  def: ปกติรันใน thread pool
+  async def: รันบน event loop
+
+- ประเด็น: เหมาะกับ
+  def: sync library/งานสั้น หรือจัดการ blocking อย่างเหมาะสม
+  async def: งาน I/O ที่ library รองรับ async
+
+- ประเด็น: ตัวอย่าง
+  def: sync_delay()
+  async def: async_delay()
+
+
+17.2 time.sleep() กับ asyncio.sleep()
+-------------------------------------
+
+- คำสั่ง: time.sleep(3)
+  ผลระหว่างรอ: block thread
+
+- คำสั่ง: await asyncio.sleep(3)
+  ผลระหว่างรอ: suspend coroutine และคืน control ให้ event loop
+
+
+17.3 Sequential กับ Concurrent
+------------------------------
+
+- แบบ: Sequential
+  เริ่มงานถัดไปเมื่อไร: งานก่อนหน้าจบ
+  เวลาคร่าว ๆ: ผลรวมเวลารอ
+  ตัวอย่าง: /sequential-fetch
+
+- แบบ: Concurrent
+  เริ่มงานถัดไปเมื่อไร: เริ่มหลายงานก่อนรอครบ
+  เวลาคร่าว ๆ: ใกล้งานช้าที่สุด
+  ตัวอย่าง: /concurrent-tasks, /concurrent-fetch
+
+
+17.4 Text กับ JSON บน WebSocket
+-------------------------------
+
+- ระบบ: Chat
+  รับ: receive_text()
+  ส่ง: send_text()
+  รูปแบบ: string
+
+- ระบบ: Rocket
+  รับ: receive_json()
+  ส่ง: send_json()
+  รูปแบบ: dictionary/JSON protocol
+
+
+17.5 Chat Manager กับ Rocket Manager
+------------------------------------
+
+- ประเด็น: connection key
+  Chat: student ID
+  Rocket: rocket/client ID
+
+- ประเด็น: state เพิ่มเติม
+  Chat: ไม่มี
+  Rocket: x, y, angle, color
+
+- ประเด็น: broadcast
+  Chat: text
+  Rocket: JSON event
+
+- ประเด็น: Dashboard พิเศษ
+  Chat: ไม่มี
+  Rocket: ID DASHBOARD
+
+- ประเด็น: send error handling
+  Chat: ไม่มี try/except ราย connection
+  Rocket: catch exception แล้ว pass
+
+
+----------------------------------------------------------------
+
+18. Practical Labs
+------------------
+
+ทุก Lab ให้ทำนายผลก่อนรัน แล้วจึงทดลองจริง การแก้ source เพื่อทดลองควรทำบนสำเนาหรือ
+revert ก่อนส่งงาน
+
+Lab 1 — Path, Query และ Validation
+----------------------------------
+
+วัตถุประสงค์: แยกแหล่งข้อมูลของ parameter ได้
+
+1. รัน fastapi_basic_lab.py
+2. เรียก /items/10, /items/-5, /items/abc
+3. เรียก /users?username=Bai
+4. เรียก /users?username=Bai&age=abc
+5. จดว่า request ใดเข้า function และ request ใดถูก validation ปฏิเสธ
+
+เกณฑ์ผ่าน: อธิบายได้ว่า path/query field ไหนถูกแปลงเป็น int
+
+Lab 2 — GPA Boundary
+--------------------
+
+POST นักศึกษาด้วย GPA:
+
+[โค้ด / แผนภาพ : text]
+1.99, 2.00, 2.01
+[จบโค้ด / แผนภาพ]
+
+ทำนาย academic_probation_alert ของแต่ละค่า
+
+เฉลยแนวคิด: เงื่อนไขคือ < 2.00 ดังนั้น true เฉพาะ 1.99
+
+Lab 3 — Blocking เทียบ Non-blocking
+-----------------------------------
+
+1. เปิด /sync-delay และ /async-delay
+2. ดูเวลาของ request เดี่ยว
+3. ทดลองเปิดหลาย request ใกล้กัน
+4. อธิบายว่าทำไม “แต่ละ request ใช้ ~3 วินาที” ไม่ได้แปลว่าพฤติกรรม resource เหมือนกัน
+
+Lab 4 — ทำนาย gather()
+----------------------
+
+จาก wait time 2, 3, 1 วินาที ตอบก่อนรัน:
+
+1. งานใด print Finished ก่อน
+2. results_received เรียงแบบใด
+3. เวลารวมใกล้เท่าไร
+
+เฉลย: Gamma → Alpha → Beta; results Alpha/Beta/Gamma; รวม ~3 วินาที
+
+Lab 5 — Resilience ของ External API
+-----------------------------------
+
+1. เรียกทั้ง 3 endpoint อย่างละหลายรอบ
+2. บันทึก elapsed_seconds
+3. บันทึก fallback_activated
+4. เปรียบเทียบ sequential กับ concurrent
+5. อธิบายว่าทำไมผลแต่ละรอบอาจไม่เหมือนกัน
+
+Lab 6 — Chat Broadcast
+----------------------
+
+1. เปิด client สอง ID
+2. ให้แต่ละฝั่งส่งข้อความ
+3. เปิด GET / ของ central server และดู connected_students
+4. ปิด client หนึ่งตัว
+5. ตรวจ system message และรายชื่ออีกครั้ง
+
+เกณฑ์ผ่าน: ทุก client เห็นข้อความเดียวกันและอธิบาย flow ผ่าน manager ได้
+
+Lab 7 — ตรวจ Port ด้วยการอ่านโค้ด
+---------------------------------
+
+โดยไม่แก้ไฟล์ ให้กรอกตาราง:
+
+- ไฟล์: chat-hello/client2.py WebSocket
+  Port ในข้อความ/comment: ?
+  Port ที่ code ใช้จริง: ?
+
+- ไฟล์: rocket/student.py local HTTP
+  Port ในข้อความ/comment: ?
+  Port ที่ code ใช้จริง: ?
+
+- ไฟล์: rocket/student2.py local HTTP
+  Port ในข้อความ/comment: ?
+  Port ที่ code ใช้จริง: ?
+
+
+เฉลย: 8000→8088, 8001→8002, 8001→8003
+
+Lab 8 — Rocket Geometry
+-----------------------
+
+เริ่มที่ (400, 300, 0°) ทำนายหลัง:
+
+1. THRUST หนึ่งครั้ง
+2. ROTATE_RIGHT หกครั้ง
+3. THRUST หนึ่งครั้ง
+
+แนวคิด:
+
+- ครั้งแรกได้ประมาณ (408, 300)
+- หมุนขวา 6 ครั้งได้ 90°
+- thrust ที่ 90° เพิ่ม y ประมาณ 8 จึงได้ (408, 308)
+
+Lab 9 — Multi-Rocket
+--------------------
+
+1. เปิด dashboard
+2. เปิด controller สอง ID
+3. หมุนและขยับคนละทิศ
+4. ตรวจว่า UPDATE ของ ID หนึ่งไม่แก้ state อีก ID
+5. ปิดหนึ่ง controller และตรวจ DESPAWN
+
+Lab 10 — ออกแบบ Message ใหม่บนกระดาษ
+------------------------------------
+
+ไม่ต้องแก้โค้ด ออกแบบ event RESET เพื่อย้ายจรวดกลับ (400,300,0) ตอบว่า:
+
+- JSON จาก controller ควรหน้าตาอย่างไร
+- server ต้องตรวจที่ส่วนไหน
+- server ควร broadcast event ใดหลัง reset
+- dashboard ต้องแก้หรือไม่ หากได้รับ UPDATE รูปแบบเดิม
+
+คำตอบที่สมเหตุผลคือส่ง {"type":"CONTROL","action":"RESET"} ให้ server เพิ่ม branch แล้ว
+broadcast UPDATE; dashboard ไม่ต้องเพิ่ม protocol ใหม่
+
+----------------------------------------------------------------
+
+19. คำถามแนวสอบพร้อมคำตอบสั้น
+-----------------------------
+
+19.1 FastAPI รู้ได้อย่างไรว่า item_id ต้องเป็นเลข
+-------------------------------------------------
+
+จาก type hint item_id: int และ FastAPI ทำ parsing/validation ก่อนเรียก function
+
+19.2 username กับ age เป็น query parameter เพราะอะไร
+----------------------------------------------------
+
+เพราะไม่ได้อยู่ใน path และเป็น parameter ธรรมดาของ GET function โดย username required
+ส่วน age default 18
+
+19.3 Pydantic model มีหน้าที่อะไร
+---------------------------------
+
+กำหนด schema ของ request body ช่วย parse, แปลงชนิด และ validation ข้อมูล
+
+19.4 ทำไม /async-delay ยังใช้ 3 วินาที
+--------------------------------------
+
+Async ไม่ได้ลบเวลารอ แต่ทำให้ coroutine ยอมคืน control ระหว่างรอ
+
+19.5 gather() ใน Async Basic ใช้เวลาประมาณเท่าไร
+------------------------------------------------
+
+ประมาณ 3 วินาที เพราะรอ task ช้าที่สุด ไม่ใช่ผลรวม 6 วินาที
+
+19.6 Concurrent เหมือน parallel เสมอหรือไม่
+-------------------------------------------
+
+ไม่เสมอ ในแล็บนี้เป็น cooperative concurrency ของงานรอ I/O บน event loop
+
+19.7 raise_for_status() ทำอะไร
+------------------------------
+
+ทำให้ HTTP response ที่เป็น error status ก่อ exception เพื่อเข้า error handling
+
+19.8 Fallback ช่วยอะไร
+----------------------
+
+ทำให้ endpoint ยังคืนข้อมูลที่มีรูปแบบใช้ต่อได้เมื่อ upstream unavailable
+
+19.9 ถ้า external API หนึ่งล้ม /concurrent-fetch พังทั้งหมดไหม
+--------------------------------------------------------------
+
+ตามโค้ดไม่พังจาก httpx.HTTPError นั้น เพราะ fetch_safely() จับ error ของแต่ละงานและคืน
+mock
+
+19.10 WebSocket ต่างจาก HTTP request อย่างไร
+--------------------------------------------
+
+WebSocket เปิด connection สองทางค้างไว้ ส่งข้อมูลได้หลายครั้งโดยไม่ต้องสร้าง
+request-response ใหม่ทุกข้อความ
+
+19.11 ทำไมต้อง await websocket.accept()
+---------------------------------------
+
+เพื่อยอมรับ WebSocket handshake ก่อนเริ่มรับส่งข้อมูล
+
+19.12 Broadcast คืออะไร
+-----------------------
+
+การวนส่งข้อความ/event เดียวไปยังทุก active connection
+
+19.13 ผู้ส่ง chat เห็นข้อความตัวเองหรือไม่
+------------------------------------------
+
+เห็น เพราะ broadcast รวม connection ของผู้ส่งด้วย
+
+19.14 Rocket dashboard มีจรวดของตัวเองไหม
+-----------------------------------------
+
+ไม่มี เพราะ ID DASHBOARD ทำให้ is_dashboard=True และ server ไม่สร้าง rocket state
+
+19.15 INIT กับ SPAWN ต่างกันอย่างไร
+-----------------------------------
+
+INIT ส่ง snapshot จรวดทั้งหมดให้ client ที่เพิ่งต่อ ส่วน SPAWN แจ้งทุก client
+ว่ามีจรวดใหม่หนึ่งลำ
+
+19.16 ทำไมต้องใช้ % 360
+-----------------------
+
+เพื่อ wrap มุมให้อยู่ในวงรอบ เช่น -15° กลายเป็น 345°
+
+19.17 ทำไมจรวดไม่ออกนอกจอ
+-------------------------
+
+Server clamp x ให้อยู่ 20–780 และ y ให้อยู่ 20–580
+
+19.18 Dashboard วาดภาพต่อเนื่องได้อย่างไร
+-----------------------------------------
+
+ใช้ requestAnimationFrame(render) ส่วน WebSocket อัปเดต object rockets
+
+19.19 ถ้าใช้ ID ซ้ำมีปัญหาอะไร
+------------------------------
+
+Dictionary key เดิมถูกเขียนทับ ทำให้ state/connection ไม่ได้แยกผู้ใช้ตามที่คาด
+
+19.20 Chat และ Rocket เปิดพร้อมกันได้ไหม
+----------------------------------------
+
+ถ้าอยู่ IP/เครื่องเดียวกันและต่างต้อง bind port 8088 จะชนกัน ต้องหยุดอีกระบบหรือเปลี่ยน
+port ให้สอดคล้องทั้ง server/client
+
+----------------------------------------------------------------
+
+20. Cheat Sheet ก่อนสอบ
+-----------------------
+
+[โค้ด / แผนภาพ : text]
+FastAPI()
+    สร้าง ASGI application
+
+@app.get("/path")
+    สร้าง HTTP GET endpoint
+
+@app.post("/path")
+    สร้าง HTTP POST endpoint
+
+@app.websocket("/ws/{id}")
+    สร้าง WebSocket endpoint
+
+BaseModel
+    schema ของ JSON request body
+
+def + time.sleep()
+    งาน sync ที่ block thread ระหว่าง sleep
+
+async def + await asyncio.sleep()
+    coroutine ยอมคืน control ให้ event loop ระหว่างรอ
+
+await asyncio.gather(a, b, c)
+    รอหลาย awaitable แบบ concurrent
+    ผลเรียงตาม input
+
+async with httpx.AsyncClient()
+    ใช้ HTTP client แบบ async และ cleanup เมื่อจบ
+
+response.raise_for_status()
+    เปลี่ยน HTTP error status เป็น exception
+
+fallback
+    ใช้ข้อมูลสำรองเมื่อ upstream ล้ม
+
+await websocket.accept()
+    รับ WebSocket connection
+
+await websocket.receive_text()
+    รอรับ string
+
+await websocket.receive_json()
+    รอรับ JSON
+
+await websocket.send_text(...)
+    ส่ง string
+
+await websocket.send_json(...)
+    ส่ง JSON
+
+WebSocketDisconnect
+    exception เมื่อ peer ตัด connection
+
+Chat protocol
+    ข้อความ text -> server เติม [student_id] -> broadcast
+
+Rocket protocol
+    CONTROL -> server คำนวณ state -> UPDATE -> dashboard วาด
+
+Rocket events
+    INIT / SPAWN / CONTROL / UPDATE / DESPAWN
+
+Ports
+    basic labs 8000
+    central WebSocket 8088
+    chat clients 8001, 8002
+    rocket dashboard/controller 8001, 8002, 8003
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+21. Checklist ก่อนเข้าสอบ
+-------------------------
+
+- [ ] อธิบาย Method, path และ endpoint ได้
+- [ ] แยก path parameter, query parameter และ request body ได้
+- [ ] อธิบาย Pydantic validation ได้
+- [ ] อธิบาย def กับ async def ใน FastAPI ได้
+- [ ] แยก time.sleep() กับ await asyncio.sleep() ได้
+- [ ] ทำนายเวลาและลำดับผลของ gather() ได้
+- [ ] อธิบาย sequential กับ concurrent network requests ได้
+- [ ] อธิบาย timeout, HTTP error และ fallback ได้
+- [ ] อธิบาย HTTP กับ WebSocket ต่างกันอย่างไรได้
+- [ ] วาด flow connect → receive → broadcast → disconnect ของ chat ได้
+- [ ] อธิบาย dictionary ของ ConnectionManager ได้
+- [ ] บอก message types ของ Rocket ได้ครบ
+- [ ] คำนวณการหมุนและ THRUST เบื้องต้นได้
+- [ ] อธิบาย clamp ขอบสนามได้
+- [ ] บอก port จริงของทุก process ได้
+- [ ] ระบุ port-display inconsistency ทั้ง 3 จุดได้
+- [ ] อธิบายปัญหา ID ซ้ำและ port ชนได้
+
+----------------------------------------------------------------
+
+22. สรุปสุดท้าย
+---------------
+
+- ไฟล์: fastapi_basic_lab.py
+  จำสั้น ๆ: GET/POST, path/query/body และ Pydantic
+
+- ไฟล์: fastapi_async_basic_lab.py
+  จำสั้น ๆ: blocking, non-blocking และ gather
+
+- ไฟล์: fastapi_async_external_api_lab.py
+  จำสั้น ๆ: HTTPX, timeout, sequential/concurrent และ fallback
+
+- ไฟล์: chat-hello/main.py
+  จำสั้น ๆ: central text WebSocket และ broadcast
+
+- ไฟล์: chat-hello/client.py
+  จำสั้น ๆ: หน้า chat local port 8001
+
+- ไฟล์: chat-hello/client2.py
+  จำสั้น ๆ: หน้า chat local port 8002; ข้อความ port WS แสดงไม่ตรง
+
+- ไฟล์: rocket/main.py
+  จำสั้น ๆ: central JSON WebSocket, state และฟิสิกส์จรวด
+
+- ไฟล์: rocket/dashboard.py
+  จำสั้น ๆ: Canvas แสดงทุกจรวดที่ local port 8001
+
+- ไฟล์: rocket/student.py
+  จำสั้น ๆ: controller แรก local port 8002
+
+- ไฟล์: rocket/student2.py
+  จำสั้น ๆ: controller ที่สอง local port 8003
+
+
+แก่นของ Week 5 คือการเลือกวิธีสื่อสารและวิธีรอให้ตรงกับงาน:
+
+[โค้ด / แผนภาพ : text]
+ข้อมูลเป็นครั้ง ๆ                     -> HTTP GET/POST
+รอ I/O โดยไม่อยาก block event loop   -> async/await
+รอหลายแหล่งอิสระพร้อมกัน             -> asyncio.gather()
+บริการภายนอกอาจล้ม                    -> timeout + error handling + fallback
+ต้องรับส่งข้อมูลต่อเนื่องทันที         -> WebSocket
+หลาย client ต้องเห็น state เดียวกัน    -> central manager + broadcast
+[จบโค้ด / แผนภาพ]
+
+ถ้าอธิบายเส้นทาง Browser/Client → Endpoint → Manager/Logic → Broadcast/Response →
+Browser ได้ ใบจะเห็นภาพรวมทั้ง FastAPI, WebSocket และ Rocket เป็นระบบเดียวกัน
+ไม่ใช่ชุดคำสั่งแยกกันค่ะ
+
+========================================================================
+อ่านละเอียด — คู่มือเดิมจาก Week6_Asyncio_Robot_Factory_Guide.md
+คำสั่งติดตั้ง/ส่ง request เป็นตัวอย่างสำหรับเตรียม lab ไม่ใช่สิ่งที่ได้รันในการตรวจหนังสือ
+endpoint และค่าห้องเรียนต้องตรวจใหม่ก่อนใช้งาน
+
+Week 6 Asyncio Robot Factory Study Guide
+========================================
+
+คู่มือนี้เป็นภาษาไทยเป็นหลัก และอธิบายจาก โค้ดจริงใน Week6/robots.py เท่านั้น
+เพื่อให้เริ่มอ่านได้แม้ยังไม่คล่องเรื่อง asyncio, HTTP API หรือ httpx
+
+เป้าหมายหลังอ่านจบ: อธิบายได้ว่าโปรแกรมรีเซ็ตโรงงานอย่างไร หุ่นยนต์แต่ละตัวหยิบ A -> B
+-> C แบบเรียงลำดับอย่างไร เหตุใดหุ่นยนต์ทั้ง 4 ตัวจึงทำงานคืบหน้าพร้อมกันได้ และ
+asyncio.gather() กับ httpx.AsyncClient มีบทบาทอะไร
+
+ไฟล์ต้นฉบับที่ใช้อ้างอิง:
+
+[โค้ด / แผนภาพ : text]
+Week6/robots.py
+[จบโค้ด / แผนภาพ]
+
+ค่าจริงที่ต้องจำจากโค้ดปัจจุบัน:
+
+[โค้ด / แผนภาพ : python]
+STUDENT_ID = "6710301033"
+BASE_URL = "http://172.16.2.117:8088"
+[จบโค้ด / แผนภาพ]
+
+คู่มือนี้ไม่สมมติรายละเอียดที่ไม่มีในไฟล์ เช่น เวลาหน่วงของแต่ละชิ้นส่วน รูปแบบ JSON
+response จาก Server หรือ URL ของ Dashboard หาก Server มีเอกสารแยกต่างหาก
+ให้ยึดเอกสารนั้นเพิ่มเติมค่ะ
+
+----------------------------------------------------------------
+
+สารบัญ
+------------
+
+1. ภาพรวมโจทย์
+2. Use case และสิ่งที่ได้ฝึก
+3. คำศัพท์สำคัญ
+4. สถาปัตยกรรมและ Flow
+5. Constants ทั้งหมด
+6. API contract ที่มองเห็นจากโค้ด
+7. reset_factory()
+8. grab_part()
+9. run_robot_task()
+10. main()
+11. จุดเริ่มโปรแกรมและ Error Handling
+12. Sequential ภายในหุ่นยนต์แต่ละตัว
+13. Concurrent ระหว่างหุ่นยนต์ 4 ตัว
+14. เจาะลึก asyncio.gather()
+15. เจาะลึก httpx.AsyncClient
+16. Timing และ Expected Behavior
+17. วิธีติดตั้ง ตรวจ และรัน
+18. Network Caveats
+19. Pitfalls และ Debug Checklist
+20. แบบฝึกหัด
+21. คำถามแนวสอบ
+22. Checklist และ Cheat Sheet
+
+----------------------------------------------------------------
+
+Part A — ปูพื้นฐาน
+==================
+
+1. ภาพรวม Week 6 กำลังทำอะไร
+----------------------------
+
+โปรแกรม robots.py เป็น HTTP client แบบ asynchronous สำหรับสั่ง Robot Factory จำลองบน
+Server
+
+งานหลักมี 2 ช่วง:
+
+1. รีเซ็ตสถานะหุ่นยนต์ทั้งหมดของรหัสนักศึกษา 6710301033
+2. สั่งหุ่นยนต์ 4 ตัวให้หยิบชิ้นส่วน A, B, C
+
+กฎสำคัญของโจทย์มีสองระดับ:
+
+[โค้ด / แผนภาพ : text]
+ภายในหุ่นยนต์ตัวเดียว:
+A ต้องเสร็จก่อน -> B ต้องเสร็จก่อน -> C
+(Sequential)
+
+ระหว่างหุ่นยนต์คนละตัว:
+robot_1, robot_2, robot_3, robot_4 เริ่มคืบหน้าในช่วงเดียวกัน
+(Concurrent)
+[จบโค้ด / แผนภาพ]
+
+นี่ไม่ใช่การให้ทั้ง 12 request ทำพร้อมกันแบบไร้ลำดับ เพราะถ้าทำอย่างนั้น robot_1 อาจหยิบ
+B ก่อน A เสร็จ ซึ่งผิดเงื่อนไขของโค้ดปัจจุบัน
+
+----------------------------------------------------------------
+
+2. 🎯 Use case — เรียนแล้วใช้ทำอะไรได้
+-------------------------------------
+
+หลังอ่านบทนี้ ใบจะสามารถ:
+
+- เขียน async client ที่ส่ง HTTP request หลายสายพร้อมกัน
+- รักษาลำดับขั้นตอนภายใน workflow หนึ่งสาย
+- ใช้ client เดียวซ้ำหลาย request เพื่อประหยัด overhead
+- สร้าง URL path ด้วย Student ID และ Robot ID
+- ส่ง JSON payload ด้วย httpx
+- ตรวจ HTTP error ด้วย raise_for_status()
+- อธิบายความแตกต่างระหว่าง sequential และ concurrent ได้
+
+แนวคิดเดียวกันนำไปใช้กับงานจริงได้ เช่น:
+
+- Robot แต่ละตัวต้องทำขั้นตอน pick -> inspect -> pack ตามลำดับ แต่ Robot
+  หลายตัวทำงานพร้อมกัน
+- ลูกค้าแต่ละคนต้องผ่าน validate -> charge -> issue receipt ตามลำดับ
+  แต่รับลูกค้าหลายคนพร้อมกัน
+- ดาวน์โหลดไฟล์แต่ละชุดตามลำดับภายในชุด แต่ดาวน์โหลดหลายชุดพร้อมกัน
+
+----------------------------------------------------------------
+
+3. คำศัพท์สำคัญ
+---------------
+
+- คำศัพท์: Client
+  ความหมายแบบง่าย: โปรแกรมที่ส่งคำขอ
+  ตัวอย่างใน robots.py: robots.py
+
+- คำศัพท์: Server
+  ความหมายแบบง่าย: ระบบที่รับคำสั่งและตอบกลับ
+  ตัวอย่างใน robots.py: 172.16.2.117:8088
+
+- คำศัพท์: HTTP request
+  ความหมายแบบง่าย: คำขอที่ Client ส่งไป
+  ตัวอย่างใน robots.py: client.post(...)
+
+- คำศัพท์: HTTP response
+  ความหมายแบบง่าย: คำตอบที่ Server ส่งกลับ
+  ตัวอย่างใน robots.py: ตัวแปร response
+
+- คำศัพท์: Endpoint
+  ความหมายแบบง่าย: HTTP method + URL path ของงานหนึ่งอย่าง
+  ตัวอย่างใน robots.py: POST /student/.../reset
+
+- คำศัพท์: Payload
+  ความหมายแบบง่าย: ข้อมูลที่แนบไปกับ request
+  ตัวอย่างใน robots.py: {"part": "A"}
+
+- คำศัพท์: JSON
+  ความหมายแบบง่าย: รูปแบบข้อมูล key-value
+  ตัวอย่างใน robots.py: {"part": part}
+
+- คำศัพท์: Coroutine function
+  ความหมายแบบง่าย: ฟังก์ชันที่ประกาศด้วย async def
+  ตัวอย่างใน robots.py: grab_part()
+
+- คำศัพท์: Coroutine object
+  ความหมายแบบง่าย: สิ่งที่ได้เมื่อเรียก async function แต่ยังไม่ await
+  ตัวอย่างใน robots.py: run_robot_task(client, robot_id)
+
+- คำศัพท์: Awaitable
+  ความหมายแบบง่าย: สิ่งที่ใช้กับ await ได้
+  ตัวอย่างใน robots.py: coroutine และ Task
+
+- คำศัพท์: await
+  ความหมายแบบง่าย: รอผลโดยคืน control ให้ Event Loop ระหว่างรอ I/O
+  ตัวอย่างใน robots.py: await client.post(...)
+
+- คำศัพท์: Event Loop
+  ความหมายแบบง่าย: ตัวจัดคิวและสลับงาน async
+  ตัวอย่างใน robots.py: เริ่มโดย asyncio.run(main())
+
+- คำศัพท์: Sequential
+  ความหมายแบบง่าย: ทำตามลำดับทีละขั้น
+  ตัวอย่างใน robots.py: A -> B -> C ของ Robot เดียว
+
+- คำศัพท์: Concurrent
+  ความหมายแบบง่าย: หลายงานคืบหน้าเหลื่อมกันในเวลาเดียวกัน
+  ตัวอย่างใน robots.py: Robot 4 ตัวผ่าน gather()
+
+- คำศัพท์: Parallel
+  ความหมายแบบง่าย: ทำงานจริงในเวลาเดียวกันบนหลายหน่วยประมวลผล
+  ตัวอย่างใน robots.py: ไม่ใช่ประเด็นที่โค้ดนี้รับประกัน
+
+- คำศัพท์: I/O-bound
+  ความหมายแบบง่าย: งานที่ใช้เวลาส่วนใหญ่รอภายนอก
+  ตัวอย่างใน robots.py: รอ Network/Server ตอบ
+
+- คำศัพท์: Timeout
+  ความหมายแบบง่าย: เวลารอสูงสุด
+  ตัวอย่างใน robots.py: timeout=10.0
+
+- คำศัพท์: Exception
+  ความหมายแบบง่าย: ข้อผิดพลาดที่ขัดจังหวะ flow ปกติ
+  ตัวอย่างใน robots.py: httpx.HTTPError
+
+
+Concurrent ไม่เท่ากับ Parallel
+------------------------------
+
+ในโปรแกรมนี้ concurrency เกิดเพราะเมื่อ Robot หนึ่งกำลังรอ HTTP response Event Loop
+สามารถสลับไปส่งหรือรอ request ของ Robot อื่นได้
+
+[โค้ด / แผนภาพ : text]
+Concurrency = หลายงานคืบหน้าในช่วงเวลาเดียวกัน
+Parallelism = หลายงานประมวลผลพร้อมกันจริงบนหลาย core/thread/process
+[จบโค้ด / แผนภาพ]
+
+asyncio หนึ่ง Event Loop ก็สร้าง concurrency สำหรับงาน I/O ได้ โดยไม่จำเป็นต้องสร้าง 4
+threads หรือ 4 processes
+
+----------------------------------------------------------------
+
+Part B — Architecture และข้อมูลคงที่
+====================================
+
+4. สถาปัตยกรรม Client–Server
+----------------------------
+
+[โค้ด / แผนภาพ : text]
+ผู้ใช้รัน Week6/robots.py
+            |
+            v
+     asyncio.run(main())
+            |
+            v
+  เปิด httpx.AsyncClient 1 ตัว
+  base_url = http://172.16.2.117:8088
+            |
+            v
+  POST /student/6710301033/reset
+            |
+            v
+     รอ Reset สำเร็จ
+            |
+            v
+      asyncio.gather(...)
+       /       |       |       \
+      v        v       v        v
+  robot_1  robot_2  robot_3  robot_4
+    A->B->C   A->B->C  A->B->C   A->B->C
+       \       |       |       /
+            v
+  gather รอจน Robot ครบทุกตัว
+            |
+            v
+  พิมพ์ elapsed time
+            |
+            v
+  ออกจาก async with และปิด Client
+[จบโค้ด / แผนภาพ]
+
+Flow ของ HTTP request
+---------------------
+
+[โค้ด / แผนภาพ : text]
+robots.py
+   |
+   | POST + URL path + JSON (เฉพาะ grab)
+   v
+Robot Factory Server
+   |
+   | HTTP status + response body
+   v
+response.raise_for_status()
+   |
+   +-- status สำเร็จ --> ทำงานต่อ
+   |
+   +-- status ผิดพลาด --> โยน httpx.HTTPStatusError
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+5. Constants ทั้งหมด
+--------------------
+
+โค้ดกำหนดค่าคงที่ 4 ตัว:
+
+[โค้ด / แผนภาพ : python]
+STUDENT_ID = "6710301033"
+BASE_URL = "http://172.16.2.117:8088"
+PARTS = ["A", "B", "C"]
+ROBOTS = ["robot_1", "robot_2", "robot_3", "robot_4"]
+[จบโค้ด / แผนภาพ]
+
+- Constant: STUDENT_ID
+  Type: str
+  ค่าปัจจุบัน: "6710301033"
+  หน้าที่: แยกสถานะ/คำสั่งของนักศึกษาคนนี้
+
+- Constant: BASE_URL
+  Type: str
+  ค่าปัจจุบัน: "http://172.16.2.117:8088"
+  หน้าที่: Host และ port ของ Server
+
+- Constant: PARTS
+  Type: list[str]
+  ค่าปัจจุบัน: A, B, C
+  หน้าที่: ลำดับชิ้นส่วนที่ Robot ต้องหยิบ
+
+- Constant: ROBOTS
+  Type: list[str]
+  ค่าปัจจุบัน: robot_1 ถึง robot_4
+  หน้าที่: Robot ที่ต้องสั่งงานพร้อมกัน
+
+
+ทำไมลำดับใน PARTS สำคัญ
+-----------------------
+
+for part in PARTS อ่านสมาชิกจากซ้ายไปขวา จึงกำหนด workflow เป็น:
+
+[โค้ด / แผนภาพ : text]
+index 0 = A
+index 1 = B
+index 2 = C
+[จบโค้ด / แผนภาพ]
+
+ถ้าเปลี่ยนเป็น PARTS = ["C", "A", "B"] Robot ทุกตัวก็จะพยายามหยิบ C -> A -> B
+ตามลำดับใหม่
+
+ทำไมลำดับใน ROBOTS สำคัญบ้าง
+----------------------------
+
+ลำดับนี้ใช้สร้าง awaitable ที่ส่งให้ gather() แม้งานจริงอาจเสร็จคนละลำดับ แต่ถ้าแต่ละ
+task มี return value gather() จะคืนผลตามลำดับ input คือ robot_1, robot_2, robot_3,
+robot_4
+
+ในโค้ดปัจจุบัน run_robot_task() ไม่ได้ return ค่า ผลจากแต่ละงานจึงเป็น None และ main()
+ไม่ได้เก็บผลของ gather()
+
+----------------------------------------------------------------
+
+6. API Contract ที่เห็นได้จาก robots.py
+---------------------------------------
+
+“Contract” ในส่วนนี้หมายถึงสิ่งที่ Client สร้างและคาดหวังจากโค้ดจริง ไม่ได้เดารูปแบบ
+response ที่ไฟล์ไม่ได้ระบุ
+
+6.1 Reset Factory
+-----------------
+
+Template:
+
+[โค้ด / แผนภาพ : text]
+POST /student/{STUDENT_ID}/reset
+[จบโค้ด / แผนภาพ]
+
+ค่าจริง:
+
+[โค้ด / แผนภาพ : text]
+POST http://172.16.2.117:8088/student/6710301033/reset
+[จบโค้ด / แผนภาพ]
+
+JSON payload:
+
+[โค้ด / แผนภาพ : text]
+ไม่มี payload ที่ส่งจากโค้ดปัจจุบัน
+[จบโค้ด / แผนภาพ]
+
+Client behavior:
+
+1. ส่ง POST
+2. เรียก raise_for_status()
+3. แปลง response body ด้วย response.json()
+4. return JSON ที่ Server ตอบ
+
+รูปแบบ field ภายใน Reset response ไม่ปรากฏใน robots.py จึงไม่ควรท่อง JSON ที่เดาขึ้นเอง
+
+6.2 Grab Part
+-------------
+
+Template:
+
+[โค้ด / แผนภาพ : text]
+POST /student/{STUDENT_ID}/robot/{robot_id}/grab
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่างค่าจริงสำหรับ robot_1 หยิบ A:
+
+[โค้ด / แผนภาพ : text]
+POST http://172.16.2.117:8088/student/6710301033/robot/robot_1/grab
+[จบโค้ด / แผนภาพ]
+
+JSON payload ที่ส่งจริง:
+
+[โค้ด / แผนภาพ : json]
+{
+  "part": "A"
+}
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่างครบทุก URL path:
+
+[โค้ด / แผนภาพ : text]
+/student/6710301033/robot/robot_1/grab
+/student/6710301033/robot/robot_2/grab
+/student/6710301033/robot/robot_3/grab
+/student/6710301033/robot/robot_4/grab
+[จบโค้ด / แผนภาพ]
+
+แต่ละ path ถูกเรียก 3 ครั้ง โดย payload เปลี่ยนตามลำดับ:
+
+[โค้ด / แผนภาพ : json]
+{"part": "A"}
+{"part": "B"}
+{"part": "C"}
+[จบโค้ด / แผนภาพ]
+
+Client behavior หลัง Server ตอบสำเร็จ:
+
+[โค้ด / แผนภาพ : python]
+return {"robot": robot_id, "part": part, "status": "success"}
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่าง local return value:
+
+[โค้ด / แผนภาพ : json]
+{
+  "robot": "robot_1",
+  "part": "A",
+  "status": "success"
+}
+[จบโค้ด / แผนภาพ]
+
+สำคัญมาก: dictionary นี้สร้างโดย Client เองหลัง raise_for_status() ไม่ใช่ JSON response
+body ที่อ่านจาก Server เพราะ grab_part() ไม่ได้เรียก response.json()
+
+6.3 สรุป Endpoint และ Payload
+-----------------------------
+
+- งาน: Reset
+  Method: POST
+  Path: /student/6710301033/reset
+  JSON body: ไม่มีในโค้ด
+  Return ของ Python function: response.json() จาก Server
+
+- งาน: Grab
+  Method: POST
+  Path: /student/6710301033/robot/{robot_id}/grab
+  JSON body: {"part": part}
+  Return ของ Python function: local dict robot/part/status
+
+
+ไม่มี /api นำหน้า path ในโค้ดนี้ อย่าเติมเองจากความเคยชินของ Lab อื่น
+
+----------------------------------------------------------------
+
+Part C — อธิบายทุกฟังก์ชัน
+==========================
+
+7. reset_factory(client)
+------------------------
+
+โค้ด:
+
+[โค้ด / แผนภาพ : python]
+async def reset_factory(client: httpx.AsyncClient):
+    response = await client.post(f"/student/{STUDENT_ID}/reset")
+    response.raise_for_status()
+    return response.json()
+[จบโค้ด / แผนภาพ]
+
+7.1 Parameter
+-------------
+
+- Parameter: client
+  Type hint: httpx.AsyncClient
+  หน้าที่: ส่ง HTTP request โดยใช้ base URL และ connection pool ที่เปิดไว้
+
+
+7.2 อธิบายทีละบรรทัด
+--------------------
+
+[โค้ด / แผนภาพ : python]
+response = await client.post(f"/student/{STUDENT_ID}/reset")
+[จบโค้ด / แผนภาพ]
+
+- f-string แทน {STUDENT_ID} ด้วย 6710301033
+- path เริ่มด้วย / และถูกนำไปต่อกับ base_url
+- await รอ HTTP response แบบไม่ block Event Loop ทั้งหมด
+
+[โค้ด / แผนภาพ : python]
+response.raise_for_status()
+[จบโค้ด / แผนภาพ]
+
+- ถ้า status สำเร็จ โปรแกรมทำงานต่อ
+- ถ้าเป็น HTTP error เช่น 4xx หรือ 5xx จะเกิด httpx.HTTPStatusError
+- error นี้เป็น subclass ในกลุ่ม httpx.HTTPError จึงถูกจับที่ท้ายไฟล์ได้
+
+[โค้ด / แผนภาพ : python]
+return response.json()
+[จบโค้ด / แผนภาพ]
+
+- แปลง JSON response เป็น Python object เช่น dictionary/list ตาม body จริง
+- ถ้า body ไม่ใช่ JSON ที่ถูกต้อง อาจเกิด ValueError
+- ValueError ถูกจับใน if __name__ == "__main__"
+
+7.3 ทำไมต้อง Reset ก่อนจับเวลา
+------------------------------
+
+ใน main() reset เกิดก่อน start_time = time.time() ดังนั้นเวลา reset ไม่ถูกรวมใน elapsed
+time ของงาน Robot
+
+Reset ก่อนเริ่มช่วยให้:
+
+- ทุกการทดลองเริ่มจากสถานะที่ Server กำหนดหลัง reset
+- ลดผลค้างจากการรันรอบก่อน
+- เปรียบเทียบพฤติกรรมแต่ละรอบง่ายขึ้น
+
+อย่างไรก็ตาม โค้ดปัจจุบัน reset เฉพาะก่อนเริ่ม ไม่ได้ reset ซ้ำหลังจบหรือใน finally
+
+----------------------------------------------------------------
+
+8. grab_part(client, robot_id, part)
+------------------------------------
+
+โค้ด:
+
+[โค้ด / แผนภาพ : python]
+async def grab_part(client: httpx.AsyncClient, robot_id: str, part: str):
+    payload = {"part": part}
+    url_path = f"/student/{STUDENT_ID}/robot/{robot_id}/grab"
+
+    response = await client.post(url_path, json=payload)
+    response.raise_for_status()
+    return {"robot": robot_id, "part": part, "status": "success"}
+[จบโค้ด / แผนภาพ]
+
+8.1 Parameters
+--------------
+
+- Parameter: client
+  Type hint: httpx.AsyncClient
+  ตัวอย่าง: client จาก main()
+  หน้าที่: ส่ง request
+
+- Parameter: robot_id
+  Type hint: str
+  ตัวอย่าง: "robot_2"
+  หน้าที่: ระบุ Robot ใน URL path
+
+- Parameter: part
+  Type hint: str
+  ตัวอย่าง: "B"
+  หน้าที่: ระบุชิ้นส่วนใน JSON payload
+
+
+8.2 สร้าง payload
+-----------------
+
+[โค้ด / แผนภาพ : python]
+payload = {"part": part}
+[จบโค้ด / แผนภาพ]
+
+ถ้า part == "B" จะได้:
+
+[โค้ด / แผนภาพ : python]
+{"part": "B"}
+[จบโค้ด / แผนภาพ]
+
+เมื่อส่งด้วย json=payload HTTPX จะ serialize dictionary เป็น JSON body และตั้ง header
+ที่เหมาะกับ JSON ให้
+
+8.3 สร้าง URL path
+------------------
+
+[โค้ด / แผนภาพ : python]
+url_path = f"/student/{STUDENT_ID}/robot/{robot_id}/grab"
+[จบโค้ด / แผนภาพ]
+
+ถ้า robot_id == "robot_2" จะได้:
+
+[โค้ด / แผนภาพ : text]
+/student/6710301033/robot/robot_2/grab
+[จบโค้ด / แผนภาพ]
+
+เมื่อรวมกับ BASE_URL จะเป็น:
+
+[โค้ด / แผนภาพ : text]
+http://172.16.2.117:8088/student/6710301033/robot/robot_2/grab
+[จบโค้ด / แผนภาพ]
+
+8.4 ส่ง request
+---------------
+
+[โค้ด / แผนภาพ : python]
+response = await client.post(url_path, json=payload)
+[จบโค้ด / แผนภาพ]
+
+ระหว่างรอ Network/Server Event Loop สามารถให้ coroutine ของ Robot อื่นคืบหน้าได้
+จุดนี้คือ async I/O ที่ทำให้ concurrency มีประโยชน์
+
+8.5 ตรวจ status
+---------------
+
+[โค้ด / แผนภาพ : python]
+response.raise_for_status()
+[จบโค้ด / แผนภาพ]
+
+ทำให้ response error ไม่ถูกตีความว่า success ถ้าไม่เรียกบรรทัดนี้ โค้ดอาจสร้าง local
+dictionary ว่า success แม้ Server ตอบ 400 หรือ 500
+
+8.6 Return value
+----------------
+
+[โค้ด / แผนภาพ : python]
+{"robot": robot_id, "part": part, "status": "success"}
+[จบโค้ด / แผนภาพ]
+
+Return นี้ยืนยันเพียงว่า request ผ่าน raise_for_status() ตามที่ Client เห็น ไม่ได้เก็บ
+response body ของ Server
+
+ใน flow ปัจจุบัน run_robot_task() await ฟังก์ชันนี้ แต่ไม่ได้เก็บค่าที่ return
+จึงใช้เพื่อรอให้แต่ละขั้นสำเร็จเป็นหลัก
+
+----------------------------------------------------------------
+
+9. run_robot_task(client, robot_id)
+-----------------------------------
+
+โค้ด:
+
+[โค้ด / แผนภาพ : python]
+async def run_robot_task(client: httpx.AsyncClient, robot_id: str):
+    for part in PARTS:
+        await grab_part(client, robot_id, part)
+[จบโค้ด / แผนภาพ]
+
+ในไฟล์จริง บรรทัด await grab_part(...) เยื้องมากกว่าระดับมาตรฐานเล็กน้อย แต่ยังอยู่ใน
+block ของ for และ Python ยอมรับได้ ตราบใดที่ indentation ภายใน block สอดคล้องกัน
+
+9.1 หน้าที่
+------------
+
+ดูแล workflow ของ Robot หนึ่งตัว ตั้งแต่ A ถึง C
+
+ตัวอย่าง robot_3:
+
+[โค้ด / แผนภาพ : text]
+run_robot_task(client, "robot_3")
+       |
+       v
+POST grab A -> await จนสำเร็จ
+       |
+       v
+POST grab B -> await จนสำเร็จ
+       |
+       v
+POST grab C -> await จนสำเร็จ
+       |
+       v
+return None โดยปริยาย
+[จบโค้ด / แผนภาพ]
+
+9.2 ทำไม loop นี้เป็น Sequential
+--------------------------------
+
+เพราะมี await อยู่ในแต่ละรอบ:
+
+[โค้ด / แผนภาพ : python]
+for part in PARTS:
+    await grab_part(...)
+[จบโค้ด / แผนภาพ]
+
+Python จะไม่เลื่อนไป part ถัดไปของ Robot ตัวเดิมจน grab_part() รอบปัจจุบันจบ
+
+จึงรับประกันลำดับในฝั่ง Client ว่า:
+
+[โค้ด / แผนภาพ : text]
+A response สำเร็จ -> จึงส่ง B
+B response สำเร็จ -> จึงส่ง C
+[จบโค้ด / แผนภาพ]
+
+9.3 ถ้า A fail จะเกิดอะไร
+-------------------------
+
+หาก grab_part(..., "A") โยน exception:
+
+- loop ของ Robot ตัวนั้นหยุดทันที
+- B และ C ของ Robot ตัวนั้นไม่ถูกส่งจาก coroutine นี้
+- exception ไหลออกจาก run_robot_task() ไปยัง gather()
+- main() ไม่ได้จับภายใน จึงไหลไปยัง error handler ระดับบน
+
+พฤติกรรมของ Robot งานอื่นเมื่อ gather() เจอ exception ต้องคิดอย่างระวัง: ไม่ควรสรุปง่าย
+ๆ ว่าทุกงานจะถูก rollback หรือ cancel บน Server เพราะ HTTP request
+ที่ส่งออกไปแล้วอาจทำงานต่อ
+
+9.4 Return value ปัจจุบัน
+-------------------------
+
+ฟังก์ชันไม่มี return ชัดเจน จึงเท่ากับ:
+
+[โค้ด / แผนภาพ : python]
+return None
+[จบโค้ด / แผนภาพ]
+
+ถ้าเก็บผลจาก gather จะได้แนวคิดเป็น:
+
+[โค้ด / แผนภาพ : python]
+[None, None, None, None]
+[จบโค้ด / แผนภาพ]
+
+เมื่อทุก Robot สำเร็จ แต่โค้ดปัจจุบันไม่ได้เก็บ list นี้
+
+----------------------------------------------------------------
+
+10. main()
+------------
+
+โค้ดสำคัญ:
+
+[โค้ด / แผนภาพ : python]
+async def main():
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
+        print("Resetting Factory...")
+        await reset_factory(client)
+
+        start_time = time.time()
+        print("Starting Async Robot Operation...")
+
+        robot_tasks = [run_robot_task(client, robot_id) for robot_id in ROBOTS]
+        await asyncio.gather(*robot_tasks)
+
+        elapsed_time = time.time() - start_time
+        print(f"Finished all tasks in {elapsed_time:.2f} seconds.")
+[จบโค้ด / แผนภาพ]
+
+10.1 เปิด Async Client
+----------------------
+
+[โค้ด / แผนภาพ : python]
+async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
+[จบโค้ด / แผนภาพ]
+
+ค่าที่กำหนด:
+
+- Option: base_url
+  ค่า: http://172.16.2.117:8088
+  ความหมาย: ใช้ต่อกับ relative URL path
+
+- Option: timeout
+  ค่า: 10.0
+  ความหมาย: ค่า timeout เริ่มต้นของ request ที่ client นี้ส่ง
+
+
+async with ทำให้ปิด client/connection pool เมื่อออกจาก block ทั้งกรณีสำเร็จและเกิด
+exception
+
+10.2 Reset ก่อนเริ่ม
+--------------------
+
+[โค้ด / แผนภาพ : python]
+print("Resetting Factory...")
+await reset_factory(client)
+[จบโค้ด / แผนภาพ]
+
+จุดนี้เป็น sequential gate: ต้อง reset สำเร็จก่อนจึงเริ่ม Robot ทั้ง 4 ตัว
+
+10.3 เริ่มจับเวลา
+-----------------
+
+[โค้ด / แผนภาพ : python]
+start_time = time.time()
+[จบโค้ด / แผนภาพ]
+
+เวลาที่วัดครอบคลุมตั้งแต่ก่อนสร้าง/รัน Robot coroutines จน gather() รอครบ แต่ไม่รวม
+reset และไม่รวมเวลาสร้าง/ปิด client ทั้งหมด
+
+10.4 สร้าง coroutine 4 ตัว
+--------------------------
+
+[โค้ด / แผนภาพ : python]
+robot_tasks = [run_robot_task(client, robot_id) for robot_id in ROBOTS]
+[จบโค้ด / แผนภาพ]
+
+ค่าทางแนวคิดใน list:
+
+[โค้ด / แผนภาพ : text]
+run_robot_task(client, "robot_1")
+run_robot_task(client, "robot_2")
+run_robot_task(client, "robot_3")
+run_robot_task(client, "robot_4")
+[จบโค้ด / แผนภาพ]
+
+ชื่อตัวแปร robot_tasks อาจทำให้เข้าใจว่าเป็น asyncio.Task objects แล้ว แต่จริง ๆ list
+comprehension นี้ได้ coroutine objects เพราะไม่ได้เรียก asyncio.create_task() โดยตรง
+
+asyncio.gather() รับ coroutine เหล่านี้ได้ และจัด schedule ให้ทำงาน concurrent
+
+10.5 แตก list ด้วย *
+--------------------
+
+[โค้ด / แผนภาพ : python]
+await asyncio.gather(*robot_tasks)
+[จบโค้ด / แผนภาพ]
+
+ถ้าไม่ใส่ * จะเหมือนส่ง list เป็น argument เดียว ซึ่งไม่ใช่ awaitable ที่ gather()
+ต้องการในรูปแบบนี้
+
+เครื่องหมาย * แปลงจาก:
+
+[โค้ด / แผนภาพ : python]
+[coro1, coro2, coro3, coro4]
+[จบโค้ด / แผนภาพ]
+
+เป็นการส่ง argument:
+
+[โค้ด / แผนภาพ : python]
+asyncio.gather(coro1, coro2, coro3, coro4)
+[จบโค้ด / แผนภาพ]
+
+10.6 รอครบทุก Robot
+-------------------
+
+await asyncio.gather(...) ไม่จบใน success path จน coroutine ของ Robot ทั้ง 4 ตัวเสร็จ
+ดังนั้นเมื่อถึงบรรทัดคำนวณเวลา ตาม flow ปกติ request grab ทั้ง 12 ครั้งสำเร็จครบแล้ว
+
+10.7 คำนวณและแสดงเวลา
+---------------------
+
+[โค้ด / แผนภาพ : python]
+elapsed_time = time.time() - start_time
+print(f"Finished all tasks in {elapsed_time:.2f} seconds.")
+[จบโค้ด / แผนภาพ]
+
+.2f แสดงทศนิยม 2 ตำแหน่ง เช่น:
+
+[โค้ด / แผนภาพ : text]
+Finished all tasks in 3.27 seconds.
+[จบโค้ด / แผนภาพ]
+
+ตัวเลขข้างบนเป็นเพียงตัวอย่างรูปแบบ ไม่ใช่ผลที่ยืนยันจาก Server
+เพราะเวลาหน่วงจริงไม่ได้ระบุในไฟล์
+
+สำหรับการวัด elapsed time ในงานที่ต้องการความแม่นยำเชิงเทคนิค มักนิยม
+time.perf_counter() มากกว่า แต่คู่มือนี้อธิบายตามโค้ดปัจจุบันซึ่งใช้ time.time()
+และไม่ได้แก้ Python file
+
+----------------------------------------------------------------
+
+11. จุดเริ่มโปรแกรมและ Error Handling
+-------------------------------------
+
+โค้ด:
+
+[โค้ด / แผนภาพ : python]
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (httpx.HTTPError, ValueError) as error:
+        print(f"Error: {error}")
+[จบโค้ด / แผนภาพ]
+
+11.1 if __name__ == "__main__"
+------------------------------
+
+ทำให้ block นี้รันเมื่อสั่ง:
+
+[โค้ด / แผนภาพ : bash]
+python Week6/robots.py
+[จบโค้ด / แผนภาพ]
+
+แต่ไม่รันอัตโนมัติเมื่อ import ไฟล์เป็น module
+
+11.2 asyncio.run(main())
+------------------------
+
+ทำหน้าที่:
+
+1. สร้าง Event Loop
+2. รัน main() จนเสร็จ
+3. จัดการปิด Event Loop
+
+อย่าเขียนแค่ main() เพราะจะได้ coroutine object และเกิด warning ว่า coroutine was never
+awaited
+
+11.3 Error ที่จับ
+-----------------
+
+- Exception: httpx.HTTPError
+  ตัวอย่างสาเหตุ: ต่อ Server ไม่ได้, timeout, protocol error, HTTP status error หลัง
+  raise_for_status()
+
+- Exception: ValueError
+  ตัวอย่างสาเหตุ: Reset response แปลง JSON ไม่ได้
+
+
+เมื่อ error ที่จับได้เกิดขึ้น โปรแกรมพิมพ์:
+
+[โค้ด / แผนภาพ : text]
+Error: <รายละเอียดจริง>
+[จบโค้ด / แผนภาพ]
+
+11.4 Error ที่ไม่ได้จับ
+-----------------------
+
+exception ชนิดอื่น เช่น bug จากโค้ดหรือ type ที่ไม่คาดคิดอาจแสดง traceback ตามปกติ
+การไม่จับ Exception กว้างเกินไปช่วยไม่ให้ bug ถูกซ่อน แต่ผู้เขียนต้องเข้าใจขอบเขตนี้
+
+----------------------------------------------------------------
+
+Part D — หัวใจของ Concurrency
+=============================
+
+12. Sequential ภายใน Robot แต่ละตัว
+-----------------------------------
+
+แต่ละ Robot มี dependency chain:
+
+[โค้ด / แผนภาพ : text]
+robot_1: A --------> B --------> C
+robot_2: A --------> B --------> C
+robot_3: A --------> B --------> C
+robot_4: A --------> B --------> C
+[จบโค้ด / แผนภาพ]
+
+ในแต่ละแถว ลูกศรหมายถึง “ต้องรอ response สำเร็จก่อน”
+
+เหตุผลที่ต้อง sequential อาจเป็นกฎของ Server/โรงงาน เช่น Robot
+ต้องประกอบชิ้นส่วนตามขั้นตอน แม้ robots.py ไม่ได้อธิบายเหตุผลทางธุรกิจเพิ่มเติม
+แต่โค้ดยืนยันลำดับชัดเจน
+
+รูปแบบที่ถูก
+------------
+
+[โค้ด / แผนภาพ : python]
+for part in PARTS:
+    await grab_part(client, robot_id, part)
+[จบโค้ด / แผนภาพ]
+
+รูปแบบที่เปลี่ยน semantics
+--------------------------
+
+[โค้ด / แผนภาพ : python]
+await asyncio.gather(
+    *(grab_part(client, robot_id, part) for part in PARTS)
+)
+[จบโค้ด / แผนภาพ]
+
+รูปแบบหลังจะพยายามให้ A, B, C ของ Robot เดียวกัน concurrent ซึ่งไม่ตรงกับ “Sequential
+inside single robot” ของไฟล์ปัจจุบัน
+
+----------------------------------------------------------------
+
+13. Concurrent ระหว่าง Robot 4 ตัว
+----------------------------------
+
+Robot คนละตัวเป็น workflow แยกกัน จึงส่งเข้า gather() พร้อมกันได้:
+
+[โค้ด / แผนภาพ : text]
+เวลา --->
+
+robot_1: [grab A] [grab B] [grab C]
+robot_2: [grab A]----[grab B]--[grab C]
+robot_3: [grab A]--[grab B]----[grab C]
+robot_4: [grab A] [grab B]-----[grab C]
+[จบโค้ด / แผนภาพ]
+
+ความยาวกล่องเป็นภาพแนวคิดเท่านั้น เพราะไฟล์ไม่ได้บอก delay จริง
+
+Event Loop ทำงานโดยประมาณ:
+
+[โค้ด / แผนภาพ : text]
+1. เริ่ม coroutine robot_1 -> ส่ง A -> รอ network
+2. สลับไป robot_2       -> ส่ง A -> รอ network
+3. สลับไป robot_3       -> ส่ง A -> รอ network
+4. สลับไป robot_4       -> ส่ง A -> รอ network
+5. response ของตัวใดมาก่อน ตัวนั้นไปส่ง B ของตัวเอง
+6. ทำต่อจนแต่ละตัวครบ C
+7. gather จบเมื่อครบทั้ง 4 ตัว
+[จบโค้ด / แผนภาพ]
+
+คำว่า “พร้อมกัน” ในบทเรียนนี้ควรอธิบายอย่างแม่นยำว่า request มีโอกาส คืบหน้าเหลื่อมกัน
+ไม่ได้แปลว่าทุกบรรทัด Python ทำใน nanosecond เดียวกัน
+
+----------------------------------------------------------------
+
+14. เจาะลึก asyncio.gather()
+----------------------------
+
+บรรทัดหลัก:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.gather(*robot_tasks)
+[จบโค้ด / แผนภาพ]
+
+14.1 gather() ทำอะไรใน success path
+-----------------------------------
+
+- รับ awaitable หลายตัว
+- schedule coroutine ให้ทำงาน concurrent
+- รอจนทุกตัวสำเร็จ
+- คืนผลตามลำดับ input
+
+14.2 ลำดับเสร็จ vs ลำดับผล
+--------------------------
+
+สมมติ Robot เสร็จจริงตามลำดับ:
+
+[โค้ด / แผนภาพ : text]
+robot_3 -> robot_1 -> robot_4 -> robot_2
+[จบโค้ด / แผนภาพ]
+
+ถ้าเก็บผล:
+
+[โค้ด / แผนภาพ : python]
+results = await asyncio.gather(*robot_tasks)
+[จบโค้ด / แผนภาพ]
+
+results ยังเรียงตาม input ROBOTS:
+
+[โค้ด / แผนภาพ : text]
+result ของ robot_1
+result ของ robot_2
+result ของ robot_3
+result ของ robot_4
+[จบโค้ด / แผนภาพ]
+
+แต่ในโค้ดปัจจุบันแต่ละ coroutine return None
+
+14.3 ถ้า Robot หนึ่งเกิด exception
+----------------------------------
+
+ค่า default ของ gather() คือไม่ใช้ return_exceptions=True ดังนั้น exception
+จะถูกส่งออกมายังผู้ await
+
+สิ่งที่ต้องระวัง:
+
+- โปรแกรมจะไม่ถึงข้อความ Finished all tasks... ใน flow error นั้น
+- error จะถูกส่งขึ้นไปยัง try/except ถ้าเป็นชนิดที่จับไว้
+- อย่าสมมติว่า HTTP POST ที่ Server รับไปแล้วถูก rollback
+- อย่าสมมติว่าการหยุดรอของ Client ทำให้สถานะ Server ย้อนกลับ
+
+14.4 ทำไมไม่จำเป็นต้อง create_task() ก่อน
+-----------------------------------------
+
+gather() รับ coroutine objects ได้โดยตรงและจัด schedule ให้ จึงใช้รูปแบบนี้ได้:
+
+[โค้ด / แผนภาพ : python]
+coroutines = [run_robot_task(...) for ...]
+await asyncio.gather(*coroutines)
+[จบโค้ด / แผนภาพ]
+
+ถ้าต้องการตั้งชื่อ Task ตรวจ .done() หรือ cancel เป็นรายตัว จึงค่อยพิจารณา
+asyncio.create_task()
+
+----------------------------------------------------------------
+
+15. เจาะลึก httpx.AsyncClient
+-----------------------------
+
+15.1 ทำไมไม่ใช้ httpx.Client
+----------------------------
+
+httpx.AsyncClient มี method แบบ awaitable:
+
+[โค้ด / แผนภาพ : python]
+response = await client.post(...)
+[จบโค้ด / แผนภาพ]
+
+จึงเปิดโอกาสให้ Event Loop ไปดู Robot อื่นระหว่างรอ I/O
+
+ถ้าใช้ synchronous client ใน Event Loop การรอ network อาจ block thread และลดประโยชน์ของ
+concurrency
+
+15.2 ทำไมใช้ Client เดียวร่วมกัน
+--------------------------------
+
+main() สร้าง client ครั้งเดียวแล้วส่ง reference เดิมให้ทุกฟังก์ชัน
+
+ข้อดี:
+
+- reuse connection pool
+- ลด overhead จากการสร้าง client ใหม่ 13 ครั้ง
+- รวม base_url และ timeout ไว้จุดเดียว
+- ปิด resource อย่างเป็นระบบด้วย async with
+- รูปแบบ function แยกหน้าที่ชัดเจนและทดสอบด้วย transport จำลองได้ง่ายขึ้น
+
+15.3 base_url ต่อกับ relative path
+----------------------------------
+
+[โค้ด / แผนภาพ : python]
+base_url = "http://172.16.2.117:8088"
+path = "/student/6710301033/reset"
+[จบโค้ด / แผนภาพ]
+
+ผล URL ที่ต้องการ:
+
+[โค้ด / แผนภาพ : text]
+http://172.16.2.117:8088/student/6710301033/reset
+[จบโค้ด / แผนภาพ]
+
+15.4 json=payload
+-----------------
+
+[โค้ด / แผนภาพ : python]
+await client.post(url_path, json={"part": "A"})
+[จบโค้ด / แผนภาพ]
+
+json= ต่างจาก data= เพราะบอก HTTPX ว่าต้องส่งข้อมูลแบบ JSON และ serialize Python
+dictionary ให้
+
+15.5 Timeout 10 วินาที
+----------------------
+
+[โค้ด / แผนภาพ : python]
+timeout=10.0
+[จบโค้ด / แผนภาพ]
+
+เป็นค่า timeout config ของ HTTPX สำหรับ request ผ่าน client นี้
+ไม่ได้แปลว่าโปรแกรมทั้งชุดมีเวลารวมสูงสุด 10 วินาที
+
+เหตุผล:
+
+- Robot หนึ่งตัวมี 3 request sequential
+- แต่ละ request อาจใช้เวลาของตนเอง
+- reset ก็เป็นอีก request
+
+ดังนั้น “10 วินาที” ไม่ควรถูกตีความว่า elapsed ทั้งโรงงานต้องต่ำกว่า 10 วินาทีเสมอ
+
+15.6 raise_for_status()
+-----------------------
+
+HTTP request “ได้รับ response” ไม่ได้แปลว่า “สำเร็จ” เพราะ Server อาจตอบ 4xx/5xx
+
+[โค้ด / แผนภาพ : python]
+response.raise_for_status()
+[จบโค้ด / แผนภาพ]
+
+ทำหน้าที่เปลี่ยน HTTP error status เป็น exception เพื่อหยุด success flow
+
+----------------------------------------------------------------
+
+Part E — เวลาและผลที่คาด
+========================
+
+16. Timing Model
+----------------
+
+ใน robots.py ไม่มีตาราง delay ของ A, B, C หรือ Robot แต่ละตัว จึงคำนวณตัวเลขตายตัวไม่ได้
+
+ให้กำหนดเชิงสัญลักษณ์:
+
+[โค้ด / แผนภาพ : text]
+T(r, A) = เวลาที่ Robot r ใช้ request A
+T(r, B) = เวลาที่ Robot r ใช้ request B
+T(r, C) = เวลาที่ Robot r ใช้ request C
+[จบโค้ด / แผนภาพ]
+
+เพราะภายใน Robot เป็น sequential:
+
+[โค้ด / แผนภาพ : text]
+เวลาของ robot_r ≈ T(r,A) + T(r,B) + T(r,C)
+[จบโค้ด / แผนภาพ]
+
+เพราะ Robot 4 ตัว concurrent:
+
+[โค้ด / แผนภาพ : text]
+เวลาช่วง Robot ทั้งหมด
+≈ max(
+    เวลาของ robot_1,
+    เวลาของ robot_2,
+    เวลาของ robot_3,
+    เวลาของ robot_4
+  )
++ scheduling/network overhead
+[จบโค้ด / แผนภาพ]
+
+ไม่ใช่โดยทั่วไป:
+
+[โค้ด / แผนภาพ : text]
+ผลรวมเวลาของ request ทั้ง 12 ครั้ง
+[จบโค้ด / แผนภาพ]
+
+กรณีสมมติเพื่อฝึกคิด
+--------------------
+
+ถ้าทุก grab ใช้ 1 วินาทีเท่ากัน:
+
+[โค้ด / แผนภาพ : text]
+Robot หนึ่งตัว = 1 + 1 + 1 = 3 วินาที
+Robot สี่ตัว concurrent = ประมาณ 3 วินาที + overhead
+Robot สี่ตัว sequential = ประมาณ 12 วินาที + overhead
+[จบโค้ด / แผนภาพ]
+
+ตัวเลขนี้เป็น โจทย์สมมติ ไม่ใช่ delay จริงจาก Server
+
+ช่วงที่ถูกจับเวลา
+-----------------
+
+[โค้ด / แผนภาพ : text]
+สร้าง Client
+Reset Factory            <- ไม่รวมใน elapsed_time
+ตั้ง start_time          <- เริ่มจับตรงนี้
+Robot 1-4 ทำงาน
+กather รอครบ
+คำนวณ elapsed_time       <- หยุดเชิงตรรกะตรงนี้
+ปิด Client               <- ไม่รวมหลังคำนวณ
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+17. Expected Behavior
+---------------------
+
+ถ้า dependency พร้อม Server เข้าถึงได้ และ request ทุกตัวสำเร็จ Terminal ควรเห็นรูปแบบ:
+
+[โค้ด / แผนภาพ : text]
+Resetting Factory...
+Starting Async Robot Operation...
+Finished all tasks in X.XX seconds.
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่โค้ดปัจจุบัน ไม่พิมพ์:
+
+- ชื่อ Robot ขณะเริ่มหรือจบ
+- part แต่ละชิ้นขณะหยิบ
+- JSON response จาก reset
+- response body จาก grab
+- ผลลัพธ์ราย Robot
+
+ดังนั้นการเห็นเพียง 3 บรรทัดไม่แปลว่า loop ไม่ทำงาน โค้ดส่ง request อยู่ภายในแต่ไม่ได้
+print รายละเอียด
+
+จำนวน request ใน success path
+-----------------------------
+
+[โค้ด / แผนภาพ : text]
+Reset request = 1
+Grab requests = 4 Robots x 3 Parts = 12
+รวม = 13 HTTP POST requests
+[จบโค้ด / แผนภาพ]
+
+ลำดับที่รับประกัน
+-----------------
+
+รับประกันภายใน Robot แต่ละตัว:
+
+[โค้ด / แผนภาพ : text]
+A ก่อน B ก่อน C
+[จบโค้ด / แผนภาพ]
+
+ไม่รับประกันลำดับข้าม Robot เช่น:
+
+[โค้ด / แผนภาพ : text]
+robot_1 A ต้องจบก่อน robot_2 A
+[จบโค้ด / แผนภาพ]
+
+เพราะ Robot ทำ concurrent และขึ้นกับ Network/Server scheduling
+
+เมื่อ error
+------------
+
+ถ้าเป็น httpx.HTTPError หรือ ValueError ควรเห็น:
+
+[โค้ด / แผนภาพ : text]
+Error: <รายละเอียดข้อผิดพลาด>
+[จบโค้ด / แผนภาพ]
+
+และอาจไม่เห็นบรรทัด Finished all tasks...
+
+----------------------------------------------------------------
+
+Part F — วิธีใช้งานจริง
+=======================
+
+18. ติดตั้งและตรวจ Dependency
+-----------------------------
+
+จาก repo root:
+
+[โค้ด / แผนภาพ : bash]
+python -m pip install httpx
+[จบโค้ด / แผนภาพ]
+
+ตรวจว่า import ได้:
+
+[โค้ด / แผนภาพ : bash]
+python -c "import httpx; print(httpx.__version__)"
+[จบโค้ด / แผนภาพ]
+
+ถ้า project มี virtual environment อยู่แล้ว ควร activate environment นั้นก่อนติดตั้ง
+เพื่อไม่ปะปน package กับ Python ตัวอื่น
+
+----------------------------------------------------------------
+
+19. ตรวจ Syntax โดยไม่ยิง Server
+--------------------------------
+
+[โค้ด / แผนภาพ : bash]
+python -m py_compile Week6/robots.py
+[จบโค้ด / แผนภาพ]
+
+ถ้าไม่มีข้อความ error แปลว่า syntax compile ผ่าน
+
+ข้อจำกัด:
+
+[โค้ด / แผนภาพ : text]
+py_compile ผ่าน
+!= Server เชื่อมต่อได้
+!= endpoint ถูกตาม Server จริง
+!= request ทั้ง 13 ครั้งสำเร็จ
+[จบโค้ด / แผนภาพ]
+
+py_compile อาจสร้าง Week6/__pycache__/ ถ้าไม่ต้องการเก็บไฟล์ cache ใน repository ให้ลบ
+cache ที่เพิ่งสร้างหลังตรวจ
+
+----------------------------------------------------------------
+
+20. รันโปรแกรม
+--------------
+
+จาก repo root:
+
+[โค้ด / แผนภาพ : bash]
+python Week6/robots.py
+[จบโค้ด / แผนภาพ]
+
+หรือเข้าโฟลเดอร์ก่อน:
+
+[โค้ด / แผนภาพ : bash]
+cd Week6
+python robots.py
+[จบโค้ด / แผนภาพ]
+
+ก่อนรัน live ควรตรวจว่า:
+
+- เชื่อมต่อเครือข่ายที่เข้าถึง 172.16.2.117 ได้
+- Server เปิดที่ port 8088
+- ได้รับอนุญาตให้ reset และเปลี่ยนสถานะ Robot ของ Student ID นี้
+- ไม่มีการทดสอบของตนเองอีก process ที่กำลังใช้ state เดียวกัน
+
+การรันไม่ใช่ read-only test เพราะส่ง POST 13 ครั้งและเปลี่ยน state บน Server จริง
+
+----------------------------------------------------------------
+
+21. Network Caveats — ข้อควรระวังเรื่องเครือข่าย
+------------------------------------------------
+
+172.16.2.117 เป็น private IPv4 address โดยทั่วไปเข้าถึงได้เฉพาะเครือข่ายภายในที่ route
+ถึงเครื่องนั้น เช่น Wi-Fi/LAN ห้องเรียนหรือ VPN ที่กำหนด
+
+172.16.2.117 ไม่ใช่ 127.0.0.1
+-----------------------------
+
+[โค้ด / แผนภาพ : text]
+127.0.0.1     = เครื่องที่กำลังรัน Python เอง
+172.16.2.117  = เครื่องอื่น/Server ใน private network ตามโค้ด
+[จบโค้ด / แผนภาพ]
+
+การเปิด local server ที่ 127.0.0.1:8088 จะไม่ทำให้ client ปัจจุบันส่งไป local เพราะ
+BASE_URL ยังชี้ 172.16.2.117:8088
+
+Port 8088
+------------
+
+URL ต้องมี port ตรงกับ Server:
+
+[โค้ด / แผนภาพ : text]
+http://172.16.2.117:8088
+[จบโค้ด / แผนภาพ]
+
+ถ้าตัด :8088 browser/client จะใช้ default port ของ HTTP ซึ่งเป็นคนละปลายทาง
+
+Timeout ไม่เท่ากับ Server rollback
+----------------------------------
+
+ถ้า Client timeout ขณะ POST:
+
+[โค้ด / แผนภาพ : text]
+Client อาจหยุดรอ
+แต่ Server อาจรับคำสั่งแล้วและทำงานต่อ
+[จบโค้ด / แผนภาพ]
+
+ดังนั้น:
+
+[โค้ด / แผนภาพ : text]
+Timeout != ยืนยันว่า Robot state ไม่เปลี่ยน
+[จบโค้ด / แผนภาพ]
+
+หากต้องรู้สถานะจริง ต้องใช้ endpoint ตรวจสถานะหรือกลไก reset ตาม API ที่ Server รองรับ
+แต่ robots.py ไม่มี status endpoint จึงไม่ควรเดา URL
+
+ห้ามเปลี่ยน BASE_URL หรือ Student ID โดยเดา
+-------------------------------------------
+
+โค้ดปัจจุบันกำหนดชัดเจน:
+
+[โค้ด / แผนภาพ : python]
+BASE_URL = "http://172.16.2.117:8088"
+STUDENT_ID = "6710301033"
+[จบโค้ด / แผนภาพ]
+
+ก่อนส่งงานให้รักษาค่าตาม requirement อาจารย์ ถ้าจะทดลอง Server
+อื่นควรทำอย่างมีขอบเขตและคืนค่าก่อนส่ง
+
+----------------------------------------------------------------
+
+Part G — Pitfalls และ Debugging
+===============================
+
+22. Pitfalls ที่พบบ่อย
+----------------------
+
+22.1 ลืม await
+--------------
+
+ผิด:
+
+[โค้ด / แผนภาพ : python]
+client.post(url_path, json=payload)
+[จบโค้ด / แผนภาพ]
+
+จะได้ coroutine/awaitable ของ HTTPX แต่ request อาจไม่ถูกดำเนินการตามที่คาด และอาจมี
+warning
+
+ถูก:
+
+[โค้ด / แผนภาพ : python]
+await client.post(url_path, json=payload)
+[จบโค้ด / แผนภาพ]
+
+22.2 ทำ A, B, C concurrent ภายใน Robot
+--------------------------------------
+
+ถ้าใช้ gather กับ parts ของ Robot เดียว จะทำลายลำดับ sequential ของโจทย์
+
+22.3 ทำ Robot ทั้ง 4 sequential
+-------------------------------
+
+รูปแบบนี้ช้ากว่าและไม่ตรงจุดประสงค์:
+
+[โค้ด / แผนภาพ : python]
+for robot_id in ROBOTS:
+    await run_robot_task(client, robot_id)
+[จบโค้ด / แผนภาพ]
+
+เพราะ Robot ถัดไปเริ่มหลังตัวก่อนครบ A, B, C แล้ว
+
+22.4 ส่ง list เข้า gather() โดยไม่แตก *
+---------------------------------------
+
+ผิด:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.gather(robot_tasks)
+[จบโค้ด / แผนภาพ]
+
+ถูก:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.gather(*robot_tasks)
+[จบโค้ด / แผนภาพ]
+
+22.5 ใช้ time.sleep() ใน coroutine
+----------------------------------
+
+time.sleep() block Event Loop thread ถ้าต้องรอใน client logic ให้ใช้ await
+asyncio.sleep() แต่ในโปรแกรมนี้การรอหลักเกิดใน await client.post() อยู่แล้ว
+
+22.6 ลืม raise_for_status()
+---------------------------
+
+การได้ response 404/500 ก็ยังเป็น response object หากไม่ตรวจ status อาจประกาศ success
+ผิด
+
+22.7 เข้าใจ local return เป็น Server response
+---------------------------------------------
+
+grab_part() คืน:
+
+[โค้ด / แผนภาพ : python]
+{"robot": ..., "part": ..., "status": "success"}
+[จบโค้ด / แผนภาพ]
+
+แต่ dictionary นี้สร้างใน Client ไม่ได้อ่านจาก response.json()
+
+22.8 คิดว่า timeout 10 วินาทีครอบทั้งโปรแกรม
+--------------------------------------------
+
+ค่าของ HTTPX ใช้กับ request operations ตาม config ไม่ใช่ global deadline ของ Robot
+workflow ทั้งหมด
+
+22.9 คิดว่า robot_tasks เป็น Task object แล้ว
+---------------------------------------------
+
+ค่าปัจจุบันเป็น coroutine objects จน gather() schedule ให้ ถ้าต้องการ method เช่น
+.done() ต้องสร้าง Task จริงก่อน
+
+22.10 คิดว่า gather() ทำให้ลำดับ A/B/C หาย
+------------------------------------------
+
+gather() อยู่ระดับ Robot ส่วน loop ที่ await ทีละ part ยังรักษาลำดับของแต่ละ Robot
+
+22.11 ใช้ synchronous HTTP client ใน async flow
+-----------------------------------------------
+
+อาจ block Event Loop ทำให้ Robot อื่นไม่คืบหน้าระหว่างรอ network
+
+22.12 ทดสอบ live ซ้ำโดยไม่รู้ผลข้างเคียง
+----------------------------------------
+
+โปรแกรม reset state แล้วส่ง POST จำนวนมาก การรันซ้ำอาจชนกับการดูผลหรือการทดลอง process
+อื่นของ Student ID เดียวกัน
+
+----------------------------------------------------------------
+
+23. Debug Checklist
+-------------------
+
+- อาการ: ModuleNotFoundError: httpx
+  สาเหตุที่เป็นไปได้: ยังไม่ติดตั้ง package ใน Python environment นี้
+  วิธีตรวจ: python -m pip install httpx
+
+- อาการ: ConnectError
+  สาเหตุที่เป็นไปได้: Server ปิด, IP ผิด, อยู่คนละ network
+  วิธีตรวจ: ตรวจ network และ BASE_URL
+
+- อาการ: ConnectTimeout
+  สาเหตุที่เป็นไปได้: ต่อปลายทางไม่ทัน
+  วิธีตรวจ: ตรวจ Wi-Fi/VPN/firewall/Server
+
+- อาการ: ReadTimeout
+  สาเหตุที่เป็นไปได้: ต่อได้แต่ Server ตอบช้าเกิน config
+  วิธีตรวจ: ตรวจ Server load และ timeout
+
+- อาการ: HTTP 404
+  สาเหตุที่เป็นไปได้: path, Student ID หรือ Robot ID ไม่ตรง API
+  วิธีตรวจ: เปรียบเทียบ endpoint ทีละตัวอักษร
+
+- อาการ: HTTP 4xx
+  สาเหตุที่เป็นไปได้: payload หรือ state ไม่ถูกต้อง
+  วิธีตรวจ: ตรวจ {"part": "A/B/C"} และ error body
+
+- อาการ: HTTP 5xx
+  สาเหตุที่เป็นไปได้: Server เกิดปัญหา
+  วิธีตรวจ: ดู Server log/แจ้งผู้ดูแล
+
+- อาการ: ValueError หลัง reset
+  สาเหตุที่เป็นไปได้: reset response ไม่ใช่ JSON ที่ parse ได้
+  วิธีตรวจ: ตรวจ response จริงด้วยเครื่องมือที่ได้รับอนุญาต
+
+- อาการ: เห็นแค่ 3 บรรทัด
+  สาเหตุที่เป็นไปได้: โค้ดไม่ได้ print ราย part
+  วิธีตรวจ: เป็น behavior ปัจจุบัน ไม่จำเป็นต้องเป็น bug
+
+- อาการ: เวลาไม่คงที่
+  สาเหตุที่เป็นไปได้: Network และ Server scheduling เปลี่ยน
+  วิธีตรวจ: ดูแนวโน้มหลายรอบ ไม่ยึดเลขเดียว
+
+- อาการ: บาง Robot หยุดก่อน C
+  สาเหตุที่เป็นไปได้: request ก่อนหน้าเกิด exception
+  วิธีตรวจ: อ่าน Error: และ Server log
+
+- อาการ: Local server เปิดแต่ยังต่อไม่ได้
+  สาเหตุที่เป็นไปได้: code ชี้ private IP
+  วิธีตรวจ: ตรวจ BASE_URL
+
+
+วิธีไล่ตรวจทีละชั้น
+-------------------
+
+1. ตรวจ syntax:
+
+[โค้ด / แผนภาพ : bash]
+   python -m py_compile Week6/robots.py
+[จบโค้ด / แผนภาพ]
+
+2. ตรวจ dependency:
+
+[โค้ด / แผนภาพ : bash]
+   python -c "import httpx; print('httpx ready')"
+[จบโค้ด / แผนภาพ]
+
+3. ตรวจค่าจากไฟล์:
+
+[โค้ด / แผนภาพ : text]
+   STUDENT_ID = 6710301033
+   BASE_URL   = http://172.16.2.117:8088
+[จบโค้ด / แผนภาพ]
+
+4. ตรวจว่าเครื่องอยู่ใน network ที่เข้าถึง Server ได้
+5. รัน live เฉพาะเมื่อยอมรับผลข้างเคียงของ reset/grab
+6. อ่านข้อความ error เต็ม ๆ ไม่แก้ timeout หรือ URL แบบสุ่ม
+
+----------------------------------------------------------------
+
+Part H — แบบฝึกหัด
+==================
+
+24. Exercise 1 — วาด Timeline
+-----------------------------
+
+ให้สมมติ delay ต่อ request ดังนี้:
+
+- Robot: robot_1
+  A: 1s
+  B: 1s
+  C: 1s
+
+- Robot: robot_2
+  A: 2s
+  B: 1s
+  C: 1s
+
+- Robot: robot_3
+  A: 1s
+  B: 3s
+  C: 1s
+
+- Robot: robot_4
+  A: 1s
+  B: 1s
+  C: 2s
+
+
+ตอบ:
+
+1. Robot แต่ละตัวใช้เวลารวมเท่าไร
+2. Robot ใดเสร็จช้าที่สุด
+3. gather() จบประมาณกี่วินาที ถ้าไม่คิด overhead
+
+เฉลยแนวคิด:
+
+[โค้ด / แผนภาพ : text]
+robot_1 = 3s
+robot_2 = 4s
+robot_3 = 5s
+robot_4 = 4s
+gather จบประมาณ max(3, 4, 5, 4) = 5s
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+25. Exercise 2 — นับ Request
+----------------------------
+
+ถ้าเพิ่ม:
+
+[โค้ด / แผนภาพ : python]
+PARTS = ["A", "B", "C", "D"]
+ROBOTS = ["robot_1", "robot_2", "robot_3", "robot_4", "robot_5"]
+[จบโค้ด / แผนภาพ]
+
+จำนวน request ใน success path เป็นเท่าไร
+
+เฉลย:
+
+[โค้ด / แผนภาพ : text]
+Reset = 1
+Grab  = 5 x 4 = 20
+รวม   = 21 POST requests
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+26. Exercise 3 — เปรียบเทียบ Flow
+---------------------------------
+
+อธิบายความต่างระหว่าง:
+
+[โค้ด / แผนภาพ : python]
+for robot_id in ROBOTS:
+    await run_robot_task(client, robot_id)
+[จบโค้ด / แผนภาพ]
+
+กับ:
+
+[โค้ด / แผนภาพ : python]
+robot_tasks = [run_robot_task(client, robot_id) for robot_id in ROBOTS]
+await asyncio.gather(*robot_tasks)
+[จบโค้ด / แผนภาพ]
+
+คำตอบย่อ:
+
+- แบบแรก: Robot ทั้งตัวทำ sequential ทีละตัว
+- แบบสอง: Robot 4 workflow ทำ concurrent แต่ A/B/C ภายในแต่ละ workflow ยัง sequential
+
+----------------------------------------------------------------
+
+27. Exercise 4 — อ่าน API Request
+---------------------------------
+
+เมื่อเรียก:
+
+[โค้ด / แผนภาพ : python]
+await grab_part(client, "robot_4", "C")
+[จบโค้ด / แผนภาพ]
+
+ให้เขียน Method, URL และ JSON body
+
+เฉลย:
+
+[โค้ด / แผนภาพ : text]
+Method: POST
+URL: http://172.16.2.117:8088/student/6710301033/robot/robot_4/grab
+[จบโค้ด / แผนภาพ]
+
+[โค้ด / แผนภาพ : json]
+{
+  "part": "C"
+}
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+28. Exercise 5 — ทำนาย Failure
+------------------------------
+
+ถ้า robot_2 หยิบ B แล้ว Server ตอบ HTTP 500:
+
+1. raise_for_status() ทำอะไร
+2. robot_2 จะส่ง C หรือไม่
+3. จะเห็นข้อความ Finished หรือไม่ใน flow นี้
+4. error ไปจบที่ไหน
+
+เฉลยแนวคิด:
+
+1. โยน httpx.HTTPStatusError
+2. ไม่ส่ง C จาก loop นี้ เพราะ coroutine หยุดที่ exception
+3. โดยปกติไม่ถึงบรรทัด Finished
+4. ไหลผ่าน gather() และ main() ไปถูกจับใน except httpx.HTTPError แล้วพิมพ์ Error: ...
+
+อย่าสรุปว่า request ของ Robot อื่นหรือ state บน Server ถูก rollback
+เพราะโค้ดไม่ได้รับประกันเรื่องนั้น
+
+----------------------------------------------------------------
+
+29. Exercise 6 — ออกแบบผลลัพธ์โดยไม่แก้ไฟล์จริง
+-----------------------------------------------
+
+ลองเขียนบนกระดาษว่าจะปรับ run_robot_task() อย่างไรให้เก็บผลของ A, B, C แล้ว return list
+โดยยัง sequential
+
+แนวคำตอบ:
+
+[โค้ด / แผนภาพ : python]
+async def run_robot_task(client, robot_id):
+    results = []
+    for part in PARTS:
+        result = await grab_part(client, robot_id, part)
+        results.append(result)
+    return results
+[จบโค้ด / แผนภาพ]
+
+จากนั้น results = await asyncio.gather(...) จะเป็น list ซ้อนตาม Robot และ Part
+
+นี่เป็นแบบฝึกหัดแนวคิดเท่านั้น ไฟล์ robots.py ปัจจุบันไม่ได้ถูกแก้
+
+----------------------------------------------------------------
+
+30. Exercise 7 — ออกแบบ Mock Test
+---------------------------------
+
+โจทย์: ถ้าไม่ต้องการยิง Server จริง ควรทดสอบอะไรบ้างด้วย httpx.MockTransport
+
+Checklist:
+
+- [ ] Reset ใช้ method POST
+- [ ] Reset path เป็น /student/6710301033/reset
+- [ ] Grab path มี Student ID และ Robot ID ถูกต้อง
+- [ ] Grab body เป็น {"part": ...}
+- [ ] Robot เดียวส่ง A, B, C ตามลำดับ
+- [ ] มี Robot ครบ 4 ตัว
+- [ ] HTTP 500 ทำให้เกิด exception
+- [ ] Reset response ที่ไม่ใช่ JSON ทำให้เกิด ValueError
+
+Mock test เหมาะกว่า live test สำหรับตรวจ request contract เพราะไม่เปลี่ยน state บน
+Server และผลไม่ขึ้นกับเครือข่าย
+
+----------------------------------------------------------------
+
+Part I — คำถามแนวสอบ
+====================
+
+31. คำถามพร้อมคำตอบสั้น
+-----------------------
+
+31.1 async def คืออะไร
+----------------------
+
+ใช้ประกาศ coroutine function ซึ่งสามารถใช้ await ภายในและทำงานกับ Event Loop ได้
+
+31.2 await ทำอะไร
+-----------------
+
+รอ awaitable ให้เสร็จ พร้อมเปิดโอกาสให้ Event Loop ไปจัดการงาน async อื่นระหว่างรอ I/O
+
+31.3 ทำไม grab_part() เหมาะกับ async
+------------------------------------
+
+เพราะส่ง HTTP request ซึ่งเป็นงาน I/O-bound เวลาส่วนใหญ่คือการรอ Network/Server
+
+31.4 ทำไม A, B, C ต้อง sequential
+---------------------------------
+
+เพราะ for part in PARTS มี await grab_part(...) ในแต่ละรอบ จึงไม่เริ่ม part
+ถัดไปจนรอบปัจจุบันสำเร็จ
+
+31.5 ทำไม Robot 4 ตัว concurrent
+--------------------------------
+
+เพราะสร้าง coroutine 4 ตัวและส่งทั้งหมดให้ asyncio.gather()
+
+31.6 gather() รออะไร
+--------------------
+
+ใน success path รอ awaitable ทั้งหมดให้เสร็จ และคืนผลตามลำดับ input
+
+31.7 robot_tasks เป็น Task object หรือไม่
+-----------------------------------------
+
+ในโค้ดปัจจุบันเป็น list ของ coroutine objects ก่อนส่งให้ gather() ไม่ได้สร้างด้วย
+asyncio.create_task() โดยตรง
+
+31.8 *robot_tasks ทำอะไร
+------------------------
+
+แตกสมาชิกใน list ให้เป็น positional arguments หลายตัวของ gather()
+
+31.9 ทำไม reuse AsyncClient
+---------------------------
+
+ใช้ connection pool ร่วมกัน ลด overhead รวม config ไว้จุดเดียว และปิด resource ด้วย
+async with
+
+31.10 base_url ทำอะไร
+---------------------
+
+เป็นส่วน host/port ที่ HTTPX นำไปต่อกับ relative path ใน client.post()
+
+31.11 json=payload ทำอะไร
+-------------------------
+
+serialize Python dictionary เป็น JSON request body และตั้ง content type ที่เหมาะสม
+
+31.12 raise_for_status() ทำอะไร
+-------------------------------
+
+โยน exception เมื่อ HTTP status เป็น error เพื่อไม่ให้ flow ทำเหมือน request สำเร็จ
+
+31.13 Reset endpoint คืออะไร
+----------------------------
+
+[โค้ด / แผนภาพ : text]
+POST http://172.16.2.117:8088/student/6710301033/reset
+[จบโค้ด / แผนภาพ]
+
+31.14 Grab endpoint คืออะไร
+---------------------------
+
+[โค้ด / แผนภาพ : text]
+POST http://172.16.2.117:8088/student/6710301033/robot/{robot_id}/grab
+[จบโค้ด / แผนภาพ]
+
+พร้อม JSON:
+
+[โค้ด / แผนภาพ : json]
+{"part": "A"}
+[จบโค้ด / แผนภาพ]
+
+โดยค่า part เปลี่ยนเป็น A, B, C ตามรอบ
+
+31.15 Success path มี request กี่ครั้ง
+--------------------------------------
+
+13 ครั้ง: reset 1 + grab 12
+
+31.16 Timeout 10 วินาทีหมายถึงทั้งโปรแกรมต้องจบใน 10 วินาทีหรือไม่
+------------------------------------------------------------------
+
+ไม่ใช่ เป็น timeout config ของ HTTP request operations ผ่าน Client ไม่ใช่ global
+deadline ของทั้ง workflow
+
+31.17 ทำไม elapsed time ไม่รวม reset
+------------------------------------
+
+เพราะ start_time ถูกกำหนดหลัง await reset_factory(client)
+
+31.18 Concurrent เร็วเท่าผลรวม หรือเท่างานช้าที่สุด
+---------------------------------------------------
+
+สำหรับ 4 Robot workflow ที่เริ่ม concurrent เวลารวมมีแนวโน้มใกล้ workflow Robot
+ที่ช้าที่สุด บวก overhead ไม่ใช่ผลรวมทั้ง 4 workflow
+
+31.19 ถ้า request timeout แปลว่า Server ไม่เปลี่ยน state ใช่ไหม
+---------------------------------------------------------------
+
+ไม่เสมอ Server อาจได้รับ POST แล้วและทำต่อ แม้ Client หยุดรอ
+
+31.20 grab_part() ใช้ JSON response จาก Server หรือไม่
+------------------------------------------------------
+
+ไม่ใช้ body หลังตรวจ status แต่สร้าง local success dictionary แล้ว return
+
+31.21 reset_factory() ใช้ JSON response หรือไม่
+-----------------------------------------------
+
+ใช้ โดยเรียก response.json() และ return ผล
+
+31.22 ถ้า Reset response ไม่ใช่ JSON เกิดอะไร
+---------------------------------------------
+
+response.json() อาจโยน ValueError ซึ่ง error handler ระดับบนจับและพิมพ์ได้
+
+31.23 ทำไมไม่ควรใช้ time.sleep() ใน async function
+--------------------------------------------------
+
+เพราะ block Event Loop thread ทำให้งาน Robot อื่นคืบหน้าไม่ได้ในช่วงนั้น
+
+31.24 โปรแกรมนี้สร้าง Thread/Process เพิ่มหรือไม่
+-------------------------------------------------
+
+โค้ดไม่ได้สร้าง Thread หรือ Process เอง ใช้ Event Loop และ async I/O
+
+31.25 มีการ reset หลังจบหรือไม่
+-------------------------------
+
+ไม่มีในโค้ดปัจจุบัน มีเฉพาะ reset ก่อนเริ่ม Robot operation
+
+----------------------------------------------------------------
+
+Part J — Checklist ก่อนสอบ
+==========================
+
+32. Concept Checklist
+---------------------
+
+- [ ] อธิบาย Client, Server, Request, Response ได้
+- [ ] อธิบาย coroutine, Task และ Event Loop ได้
+- [ ] แยก concurrency ออกจาก parallelism ได้
+- [ ] รู้ว่า STUDENT_ID คือ 6710301033
+- [ ] รู้ว่า BASE_URL คือ http://172.16.2.117:8088
+- [ ] จำ PARTS = ["A", "B", "C"] ได้
+- [ ] จำ Robot 4 ตัวได้
+- [ ] เขียน Reset endpoint ได้ตรง
+- [ ] เขียน Grab endpoint และ payload ได้ตรง
+- [ ] อธิบาย raise_for_status() ได้
+- [ ] อธิบาย response.json() ได้
+- [ ] รู้ว่า Grab return เป็น local dict
+- [ ] อธิบาย sequential ภายใน Robot ได้
+- [ ] อธิบาย concurrent ระหว่าง Robot ได้
+- [ ] อธิบาย asyncio.gather(*robot_tasks) ได้
+- [ ] รู้ว่า gather คืนผลตาม input order
+- [ ] รู้ว่า success path มี 13 POST requests
+- [ ] รู้ว่า reset ไม่ถูกรวมใน elapsed time
+- [ ] รู้ว่า timeout ไม่รับประกัน rollback
+
+33. Practical Checklist
+-----------------------
+
+- [ ] อยู่ที่ repo root ถูกต้อง
+- [ ] Python environment มี httpx
+- [ ] python -m py_compile Week6/robots.py ผ่าน
+- [ ] เชื่อม network ที่เข้าถึง 172.16.2.117 ได้
+- [ ] Server port 8088 เปิด
+- [ ] เข้าใจว่าการรัน live จะเปลี่ยน Server state
+- [ ] รัน python Week6/robots.py ได้เมื่อได้รับอนุญาต
+- [ ] อ่านข้อความ Error: เต็ม ๆ เมื่อมีปัญหา
+- [ ] ไม่เปลี่ยน Student ID หรือ URL โดยเดา
+
+----------------------------------------------------------------
+
+Part K — Cheat Sheet
+====================
+
+34. ค่าที่ต้องจำ
+----------------
+
+[โค้ด / แผนภาพ : python]
+STUDENT_ID = "6710301033"
+BASE_URL = "http://172.16.2.117:8088"
+PARTS = ["A", "B", "C"]
+ROBOTS = ["robot_1", "robot_2", "robot_3", "robot_4"]
+[จบโค้ด / แผนภาพ]
+
+35. API ที่ต้องจำ
+-----------------
+
+[โค้ด / แผนภาพ : text]
+Reset:
+POST http://172.16.2.117:8088/student/6710301033/reset
+Body: ไม่มีในโค้ด
+
+Grab:
+POST http://172.16.2.117:8088/student/6710301033/robot/{robot_id}/grab
+Body: {"part": "A"}  # เปลี่ยนเป็น A, B, C
+[จบโค้ด / แผนภาพ]
+
+36. Async ที่ต้องจำ
+-------------------
+
+[โค้ด / แผนภาพ : text]
+async def
+    ประกาศ coroutine function
+
+await
+    รอ awaitable และคืน control ให้ Event Loop ระหว่างรอ I/O
+
+asyncio.run(main())
+    เปิด Event Loop แล้วรัน main
+
+asyncio.gather(a, b, c)
+    ให้หลาย awaitable คืบหน้า concurrent และรอครบใน success path
+
+*robot_tasks
+    แตก list เป็น arguments หลายตัว
+
+httpx.AsyncClient
+    HTTP client แบบ async
+
+async with
+    จัดการเปิด/ปิด Client อย่างถูกต้อง
+
+raise_for_status()
+    เปลี่ยน HTTP error status เป็น exception
+[จบโค้ด / แผนภาพ]
+
+37. ภาพจำสำคัญที่สุด
+--------------------
+
+[โค้ด / แผนภาพ : text]
+ผิดความเข้าใจ:
+12 grabs ทำ sequential ทั้งหมด
+A/B/C ของ Robot เดียวทำพร้อมกันหมด
+
+โค้ดจริง:
+robot_1: A -> B -> C
+robot_2: A -> B -> C
+robot_3: A -> B -> C
+robot_4: A -> B -> C
+           ^
+ทั้ง 4 แถวคืบหน้า concurrent ผ่าน gather
+แต่ในแต่ละแถวต้องเรียง A ก่อน B ก่อน C
+[จบโค้ด / แผนภาพ]
+
+38. คำสั่ง
+------------
+
+[โค้ด / แผนภาพ : bash]
+python -m pip install httpx
+python -c "import httpx; print(httpx.__version__)"
+python -m py_compile Week6/robots.py
+python Week6/robots.py
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+39. สรุปสุดท้าย
+---------------
+
+จำ 8 ข้อนี้ให้ได้:
+
+1. robots.py เป็น async HTTP client ที่คุยกับ http://172.16.2.117:8088
+2. Student ID ปัจจุบันคือ 6710301033
+3. โปรแกรม reset ก่อนเริ่ม และเวลา reset ไม่รวมใน elapsed time
+4. Robot แต่ละตัวหยิบ A -> B -> C แบบ sequential
+5. Robot 4 ตัวทำงาน concurrent ด้วย asyncio.gather()
+6. httpx.AsyncClient ทำให้รอ HTTP แบบไม่ block Event Loop และ reuse connection ได้
+7. Success path ส่ง 13 POST requests: reset 1 และ grab 12
+8. Timeout หรือ Client error ไม่ได้ยืนยันว่า Server rollback state แล้ว
+
+ประโยคสรุปสำหรับตอบอาจารย์:
+
+โปรแกรมนี้ใช้ httpx.AsyncClient ส่ง HTTP POST ไปยัง Robot Factory API โดย reset
+สถานะของรหัสนักศึกษา 6710301033 ก่อน จากนั้นสร้าง coroutine สำหรับ Robot 4 ตัวและรัน
+concurrent ด้วย asyncio.gather() ขณะที่แต่ละ Robot ยังใช้ await ใน loop
+เพื่อหยิบชิ้นส่วน A, B และ C แบบ sequential ดังนั้น concurrency เกิดข้าม Robot
+แต่ไม่ทำลายลำดับงานภายใน Robot แต่ละตัวค่ะ
+
+----------------------------------------------------------------
+
+✅ สิ่งที่ได้เรียนรู้จากคู่มือนี้
+--------------------------------
+
+- [ ] อ่าน architecture ของ async HTTP client ได้
+- [ ] แปลง source code เป็น API contract ได้โดยไม่เดาข้อมูลที่ไม่มี
+- [ ] เห็นรูปแบบ “sequential inside, concurrent outside” ชัดเจน
+- [ ] อธิบาย gather(), await และ AsyncClient ได้
+- [ ] รันและ debug โปรแกรมอย่างระวังผลข้างเคียงของ Network API ได้
