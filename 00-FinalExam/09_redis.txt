@@ -1,3 +1,90 @@
+บท 8 — Redis, Pub/Sub, Streams และ Consumer Groups
+========================================================================
+
+[REDIS-01] พื้นฐาน
+Redis เก็บ active data ใน memory จึงตอบสนองเร็ว เหมาะ cache, counter, messaging
+ไม่ใช่ว่าไม่มี disk: RDB snapshot และ AOF log เป็นแนวทาง persistence
+ความทนทานขึ้นกับ configuration ไม่ใช่แค่เลือกชื่อชนิดข้อมูล
+คำว่า single-thread มักอ้างถึงการประมวลผลคำสั่งหลัก ไม่ใช่ทุกงานใน Redis ทุกเวอร์ชัน
+
+ชนิดข้อมูลและการเลือกใช้
+String: ค่า/ตัวนับ -> SET, GET, INCR
+Hash: field-value -> HSET, HGETALL
+List: ลำดับ item -> LPUSH/RPUSH, LPOP/RPOP
+Set: สมาชิกไม่ซ้ำ -> SADD, SMEMBERS
+Sorted Set: สมาชิกมี score -> ZADD, ZRANGE
+Stream: log ของ event มี ID -> XADD, XRANGE, XREAD
+TTL: EXPIRE หรือ SET ... EX ช่วยให้ cache หมดอายุ
+INCR เป็นคำสั่ง atomic แต่ GET แล้ว SET เป็นสองคำสั่งจึงอาจแข่งกัน
+
+[PUBSUB-01] Pub/Sub
+Publisher ส่งเข้า channel; Subscriber ที่ subscribe และพร้อมรับได้รับข้อความ
+เป็น at-most-once ไม่มี message history/replay ให้ผู้ที่ offline
+เหมาะ live update ที่รับ state ใหม่แทน state เก่าได้
+Redis Pub/Sub ไม่ใช่ Redis List และไม่ใช่ Stream
+Week10 ใช้ game:commands และ game:state
+
+[STREAM-01] Streams
+XADD เพิ่ม event พร้อม field-value และ ID เช่น milliseconds-sequence
+XRANGE อ่านช่วงข้อมูล; XREAD อ่านต่อจาก ID ที่ระบุ
+การเก็บใน Stream ช่วยอ่านย้อนหลัง แต่ retention และ persistence ยังสำคัญ
+XREADGROUP ใช้ group แบ่งงานระหว่าง consumer ภายใน group เดียว
+แต่ละ group มีตำแหน่งอ่านของตน จึงใช้ต่าง group เมื่อต้องการให้แต่ละระบบอ่านครบ
+
+[STREAM-02] Pending และ acknowledgement
+XGROUP CREATE สร้าง group; id=0 เริ่มจากข้อมูลเก่า, id=$ เริ่มหลังปลายปัจจุบัน
+XREADGROUP ... STREAMS key > อ่านข้อมูลใหม่ที่ยังไม่ส่งให้ consumer ใน group
+หลังรับ ข้อความจะ pending จน XACK; XACK ไม่ได้ลบข้อความออกจาก Stream
+ต้องมีกลไก recovery/reclaim จึงจะนำงานของ consumer ที่ล่มมาทำต่อได้
+การ redelivery อาจทำซ้ำ จึงต้องออกแบบ idempotency; ไม่รับประกัน exactly-once
+
+[REDIS-02] ตัวอย่าง CLI สำหรับ Redis ที่เตรียมไว้แล้ว
+คำสั่งเหล่านี้เขียนข้อมูล demo อย่าใช้กับ key ของระบบจริงโดยไม่ตั้งใจ
+
+SET exam:count 0
+INCR exam:count
+GET exam:count
+ผลคาดหวัง: 1
+
+XADD exam:events * kind coupon value 1
+XGROUP CREATE exam:events exam_workers 0
+XREADGROUP GROUP exam_workers worker1 COUNT 1 STREAMS exam:events >
+XACK exam:events exam_workers <ID_จากผลลัพธ์>
+แทน ID จริงก่อนใช้ XACK; คำสั่ง create group ครั้งถัดไปอาจได้ BUSYGROUP
+
+ตัวอย่าง Python ต่อไปนี้ใช้ redis-py และ Redis localhost:6379
+เป็น template ไม่ได้รันกับ Redis ของห้องเรียนในการตรวจครั้งนี้
+
+[CODE redis_template]
+import asyncio  # รัน coroutine
+import redis.asyncio as redis  # client แบบ async
+async def main():
+    r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+    try:
+        message_id = await r.xadd("exam:events", {"kind": "demo"})
+        print(message_id)  # ID เปลี่ยนตามเวลาที่ server สร้าง
+    finally:
+        await r.aclose()  # ปิด client เมื่อเสร็จ
+asyncio.run(main())  # จุดเริ่มสคริปต์
+[END CODE]
+
+[F1-01] Week9 ใน repo
+student1_telemetry_producer.py -> XADD ที่ f1:telemetry:g04
+student2_pit_strategy_engineer.py -> group f1_pitwall, XREADGROUP แล้ว XACK
+init_group ใช้ id=$: group ที่สร้างใหม่ไม่ย้อนอ่านข้อมูลก่อนสร้างโดยปริยาย
+ไฟล์ของ worker อื่นทำหน้าที่ safety/DRS/dashboard ตามชื่อ
+อ่านค่า GROUP_NAME ของแต่ละไฟล์ก่อนสรุปว่าแบ่งงานหรือ broadcast
+อย่าใช้ IP เก่าจาก repo เป็นข้อเท็จจริงว่า server วันนี้ยังอยู่ที่เดิม
+
+เลือกให้เหมาะโจทย์
+live game state -> Pub/Sub; งานที่ต้องติดตามค้าง/อ่านย้อน -> Streams
+คิวภายใน process -> asyncio.Queue; messaging ข้าม process -> Redis ตามรูปแบบ
+
+========================================================================
+ภาคผนวก — โน้ตเดิมแปลงเป็นข้อความ (เก็บเนื้อหาไว้สำหรับอ่านละเอียด)
+ข้อสังเกต: โน้ตอาจอธิบายตัวอย่างคนละเวอร์ชันกับโค้ดปัจจุบัน
+ให้ใช้บทนำของคู่มือนี้เมื่อเปรียบเทียบค่าจริงกับ repo
+
 Redis — สรุปเนื้อหาแบบอ่านง่าย
 ==============================
 

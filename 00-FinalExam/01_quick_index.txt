@@ -1,0 +1,66 @@
+OPEN BOOK — ดัชนีค้นคำตอบเร็ว
+========================================================================
+เริ่มพื้นฐานที่ 02; เปิดรวมเล่มที่ 12; ฝึกข้อสอบที่ 13
+
+02_async_fundamentals.txt
+[BASE-01] ภาพใหญ่: ทำไมต้อง Async?
+[BASE-02] เลือกวิธีทำงาน
+[BASE-03] ประมาณเวลา
+
+03_coroutine_event_loop.txt
+[CORO-01] แยก function / object / task
+[LOOP-01] Event loop ทำอะไร?
+[CORO-02] อ่านโค้ดอย่างเป็นขั้นตอน
+[LOOP-02] ทำไม loop ค้าง?
+
+04_task_management.txt
+[TASK-01] Task lifecycle
+[GATHER-01] อยากได้ผลทั้งหมด
+[WAIT-01] อยากตรวจ done / pending
+[TIME-01] Timeout
+[CANCEL-01] Cancel อย่างถูกต้อง
+
+05_http_api.txt
+[HTTP-01] HTTP client ที่เหมาะกับ async
+[HTTP-02] ลำดับภายใน workflow
+[HTTP-03] แก้ปัญหาจากอาการ
+
+06_fastapi_websocket.txt
+[API-01] เลือก def / async def
+[WS-01] WebSocket ต่างจาก HTTP request/response อย่างไร?
+
+07_race_condition_lock.txt
+[LOCK-01] Race Condition คืออะไร?
+[LOCK-02] ป้องกันด้วย Lock
+[LOCK-03] ขอบเขตสำคัญ
+[LOCK-04] Coupon ใน repo
+
+08_queue.txt
+[QUEUE-01] FIFO และหน้าที่
+[QUEUE-02] API จำเป็น
+[QUEUE-03] Bounded queue
+[QUEUE-04] หยุด worker ด้วย sentinel
+[QUEUE-05] แก้คิวค้าง
+[0] [1] [2] [3] [4] [5]
+
+09_redis.txt
+[REDIS-01] พื้นฐาน
+[PUBSUB-01] Pub/Sub
+[STREAM-01] Streams
+[STREAM-02] Pending และ acknowledgement
+[REDIS-02] ตัวอย่าง CLI สำหรับ Redis ที่เตรียมไว้แล้ว
+[F1-01] Week9 ใน repo
+
+10_tank_battle.txt
+[TANK-01] Data flow
+[TANK-02] ค่าจริงของ server.py ณ commit ฐาน 058b3fe
+[TANK-03] งานที่เดินร่วมกัน
+[TANK-04] วิเคราะห์โจทย์เกม
+
+11_exam_recipes.txt
+[RECIPE-01] เลือกเครื่องมือใน 10 วินาที
+[RECIPE-02] โครงตอบข้ออธิบาย
+[RECIPE-03] โครงตอบโจทย์อ่านโค้ด
+[RECIPE-04] โจทย์เวลา
+[RECIPE-05] โจทย์เลือกตอบสองข้อ
+[RECIPE-06] คำสั่งอ่านและค้นจาก root ของ repo

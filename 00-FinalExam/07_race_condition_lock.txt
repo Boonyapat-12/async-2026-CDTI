@@ -1,3 +1,64 @@
+บท 6 — Shared State, Race Condition และ asyncio.Lock
+========================================================================
+
+[LOCK-01] Race Condition คืออะไร?
+ผลลัพธ์ขึ้นกับลำดับหรือจังหวะงานที่เข้าถึง shared state
+บน thread เดียวก็เกิดได้ หากหลาย coroutine อ่านค่าเดิมแล้วพัก await ก่อนเขียน
+Read–Modify–Write: อ่าน -> คำนวณ -> เขียน ต้องพิจารณาเป็นชุดเดียวกัน
+Critical section คือชุดคำสั่งที่ต้องป้องกันการแทรก ไม่ใช่แค่บรรทัดเขียน
+
+ตัวอย่าง interleaving
+เริ่ม count=0
+A อ่าน 0 -> await; B อ่าน 0 -> await
+A เขียน 1; B เขียน 1 -> ได้ 1 แทน 2
+
+[LOCK-02] ป้องกันด้วย Lock
+ทุกเส้นทางที่แก้ shared state ต้องใช้ lock ตัวเดียวกัน
+async with lock ปลด lock แม้เกิด exception ภายใน
+lock.acquire() ต้อง await; lock.release() ไม่ await
+อย่าใช้ lock คนละตัวในแต่ละ request เพราะไม่เกิด mutual exclusion
+อย่าล็อกกว้างเกินจำเป็น เพราะลด concurrency
+
+[CODE race_vs_lock]
+import asyncio  # สร้างงานแข่งกัน
+async def trial(use_lock):  # เปรียบเทียบสองวิธี
+    state = {"count": 0}  # ข้อมูลร่วมใน trial
+    lock = asyncio.Lock()  # lock ร่วมตัวเดียว
+    async def update():  # read-modify-write ที่เสี่ยง
+        old = state["count"]  # อ่านค่าเดิม
+        await asyncio.sleep(0)  # เปิดโอกาสให้งานอื่นอ่านค่าเดียวกัน
+        state["count"] = old + 1  # เขียนค่าที่คำนวณ
+    async def worker():
+        if use_lock:
+            async with lock:  # ครอบทั้งชุดอ่านและเขียน
+                await update()
+        else:
+            await update()  # ไม่มีตัวป้องกัน
+    await asyncio.gather(worker(), worker())  # เริ่มสองงาน
+    return state["count"]  # อ่านผลสุดท้าย
+async def main():
+    print(await trial(False), await trial(True))  # เปรียบเทียบ
+asyncio.run(main())  # รันสคริปต์
+[END CODE]
+
+[LOCK-03] ขอบเขตสำคัญ
+asyncio.Lock ใช้กับ task ภายใน event loop เดียว ไม่ใช่ thread-safe lock
+ไม่ประสานหลาย process / หลาย FastAPI worker / หลายเครื่อง
+ระบบเหล่านั้นต้องใช้ transaction, atomic operation หรือกลไกข้าม process
+Lock ไม่แก้ deadlock: ถือ lock แล้วรอ coroutine ที่ต้องขอ lock เดิมจะค้าง
+
+[LOCK-04] Coupon ใน repo
+Week7/server.py: coupons_db, current_coupon_index, student_claims
+การตรวจว่าคูปองเหลือ ตรวจสิทธิ์ และอัปเดตการแจกต้องอยู่ใน critical section
+server_vulnerable.py ใช้เป็นตัวเปรียบเทียบ; client.py ยิง request ร่วมกัน
+โจทย์ใน guide: 6 คน, สูงสุดคนละ 2 ใบ, รวม 11 ใบ
+แยก HTTP status ออกจาก application status เช่น LIMIT_REACHED
+
+========================================================================
+ภาคผนวก — โน้ตเดิมแปลงเป็นข้อความ (เก็บเนื้อหาไว้สำหรับอ่านละเอียด)
+ข้อสังเกต: โน้ตอาจอธิบายตัวอย่างคนละเวอร์ชันกับโค้ดปัจจุบัน
+ให้ใช้บทนำของคู่มือนี้เมื่อเปรียบเทียบค่าจริงกับ repo
+
 Race Conditions & asyncio.Lock — สรุปเนื้อหาแบบอ่านง่าย
 =======================================================
 

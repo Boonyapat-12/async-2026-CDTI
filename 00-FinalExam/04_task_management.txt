@@ -1,0 +1,2938 @@
+บท 3 — Task, Gather, Wait, Timeout และ Cancellation
+========================================================================
+
+[TASK-01] Task lifecycle
+create_task(coro) -> pending/running -> finished หรือ cancelled
+done() ตรวจว่าจบแล้วหรือยัง รวมกรณี cancelled
+result() อ่านค่าหลังจบ; ก่อนจบเกิด InvalidStateError
+exception() อ่าน exception หลังจบ; task ที่ cancelled ทำให้เกิด CancelledError
+get_name()/set_name() ช่วยแยกงาน; เก็บ reference ของ background task
+add_done_callback(fn) เรียก callback เมื่อจบ โดย callback รับ Task
+
+[GATHER-01] อยากได้ผลทั้งหมด
+await gather(a(), b()) คืนผลตามลำดับ input ไม่ใช่ลำดับเสร็จ
+ค่าเริ่มต้น: exception แรกถูกส่งให้ผู้รอ งานอื่นไม่ถูก cancel โดยอัตโนมัติ
+return_exceptions=True เก็บ exception ไว้ใน list ผลลัพธ์ ต้องตรวจแต่ละตำแหน่ง
+หาก gather เองถูก cancel งานที่ยังไม่จบภายในถูก cancel ด้วย
+
+[CODE gather_order]
+import asyncio  # จัดงานพร้อมกัน
+async def job(name, delay):  # งานคืนชื่อ
+    await asyncio.sleep(delay)  # รอแบบไม่บล็อก
+    return name  # คืนผล
+async def main():  # รอทั้งสองงาน
+    results = await asyncio.gather(job("A", 0.02), job("B", 0.01))
+    print(results)  # แม้ B จบก่อน ผลยังเรียง A, B
+asyncio.run(main())  # รันสคริปต์
+[END CODE]
+
+[WAIT-01] อยากตรวจ done / pending
+ส่ง Task/Future ให้ asyncio.wait(); Python 3.11+ ไม่รับ raw coroutine
+done, pending เป็น set จึงไม่มีลำดับ input
+ALL_COMPLETED รอทุกงาน; FIRST_COMPLETED กลับเมื่อมีงานจบหรือถูก cancel
+FIRST_EXCEPTION กลับเมื่อมีงานจบด้วย exception; ถ้าไม่เกิดรอทั้งหมด
+FIRST_COMPLETED อาจมีมากกว่าหนึ่ง task ใน done ณ เวลาที่ผู้รอกลับมาทำงาน
+wait(timeout=...) คืน pending และไม่ cancel งานเหล่านั้นเอง
+
+[CODE wait_cleanup]
+import asyncio  # ใช้ task และ wait
+async def job(delay):  # งานคืน delay
+    await asyncio.sleep(delay)  # รอ timer
+    return delay  # คืนผล
+async def main():  # เลือกงานเสร็จก่อน
+    tasks = {asyncio.create_task(job(d)) for d in (0.01, 0.2)}
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    print(sorted(t.result() for t in done))  # อ่านผลทุกงานที่จบ
+    for task in pending:  # ขอหยุดงานที่เหลือ
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)  # รอ cleanup
+asyncio.run(main())  # เริ่มโปรแกรม
+[END CODE]
+
+[TIME-01] Timeout
+wait_for(coro, timeout=seconds) รอผลหนึ่ง awaitable
+เมื่อหมดเวลา จะ cancel งานและรอการยกเลิก จึงอาจใช้เวลามากกว่า timeout
+Python 3.11+ จับ TimeoutError; อย่าคิดว่า timeout คือ rollback ฝั่ง server
+คำขอที่ส่งไปแล้วอาจทำให้ข้อมูลเปลี่ยน ต้องคิดเรื่อง idempotency แยกต่างหาก
+
+[CODE timeout]
+import asyncio  # ตั้งเวลารอ
+async def main():  # ทดสอบงานช้า
+    try:  # รอไม่เกินงบเวลาของผู้เรียก
+        await asyncio.wait_for(asyncio.sleep(0.2), timeout=0.01)
+    except TimeoutError:  # งานรอถูกยกเลิก
+        print("timeout")
+asyncio.run(main())  # เริ่ม loop
+[END CODE]
+
+[CANCEL-01] Cancel อย่างถูกต้อง
+cancel() เป็นคำขอยกเลิก ไม่ใช่ kill ทันที
+CancelledError ถูกส่งเข้า coroutine เมื่อมีโอกาส เช่นขณะ await
+ใช้ try/finally คืน resource; ถ้าจับ CancelledError โดยทั่วไป raise ต่อ
+CancelledError สืบจาก BaseException จึงไม่ถูก except Exception จับตามปกติ
+TaskGroup (Python 3.11+) เป็นเนื้อหาเสริม: รอทุกงานและ cancel พี่น้องเมื่อมีงาน fail
+
+repo: Week3/task_01_status.py ถึง task_10_gather_vs_wait.py
+และ Week4/foodcourt_01_create_task.py ถึง foodcourt_05_mix_concepts.py
+
+========================================================================
+อ่านละเอียด — คู่มือเดิมจาก Week3_Asyncio_Task_Stock_Courier_Guide.md
+คำสั่งติดตั้ง/ส่ง request เป็นตัวอย่างสำหรับเตรียม lab ไม่ใช่สิ่งที่ได้รันในการตรวจหนังสือ
+endpoint และค่าห้องเรียนต้องตรวจใหม่ก่อนใช้งาน
+
+Week 3 Asyncio Task, Courier, and Stock Price Guide
+===================================================
+
+คู่มือนี้เขียนจากโค้ดจริงล่าสุดในโฟลเดอร์ Week3 ของใบค่ะ
+
+ไฟล์ที่ใช้เรียนแบ่งเป็น 2 กลุ่มใหญ่:
+
+1. Example — ไฟล์ task_01 ถึง task_10 ใช้เรียนคำสั่งย่อย ๆ ของ asyncio.Task
+2. Lab / Assignment — ไฟล์งานจริง 4 ไฟล์ ได้แก่
+   - Week3/smart_courier.py
+   - Week3/stock_price.py
+   - Week3/stock_api.py
+   - Week3/stock_price_httpx.py
+
+เป้าหมาย: ให้ใบเข้าใจว่า Task ใน asyncio สร้างยังไง ตรวจสถานะยังไง ยกเลิกยังไง แข่ง task
+ด้วย FIRST_COMPLETED ยังไง และเอาไปใช้กับ HTTP request จริงผ่าน httpx ยังไง
+
+----------------------------------------------------------------
+
+1. ภาพรวม Week 3
+----------------
+
+Week 3 เน้นเรื่อง Task Control ใน asyncio
+
+ถ้า Week 2 คือ “ทำหลายงานพร้อมกันได้ยังไง”
+Week 3 คือ “เมื่อสร้างงาน async แล้ว เราจะควบคุมมันยังไง”
+
+สิ่งที่ต้องเข้าใจ:
+
+- เรื่อง: asyncio.create_task()
+  ใช้ทำอะไร: สร้างงาน async ให้ event loop ดูแล
+  ไฟล์ตัวอย่าง: task_01, smart_courier, stock_price
+
+- เรื่อง: .done()
+  ใช้ทำอะไร: เช็กว่า task เสร็จหรือยัง
+  ไฟล์ตัวอย่าง: task_01, smart_courier
+
+- เรื่อง: .cancel()
+  ใช้ทำอะไร: สั่งยกเลิก task
+  ไฟล์ตัวอย่าง: task_03, smart_courier, stock_price
+
+- เรื่อง: .cancelled()
+  ใช้ทำอะไร: เช็กว่า task ถูกยกเลิกจริงไหม
+  ไฟล์ตัวอย่าง: task_01, smart_courier
+
+- เรื่อง: asyncio.CancelledError
+  ใช้ทำอะไร: exception ที่เกิดเมื่อ task ถูก cancel
+  ไฟล์ตัวอย่าง: task_03, smart_courier
+
+- เรื่อง: .result()
+  ใช้ทำอะไร: อ่านค่าที่ task return กลับมา
+  ไฟล์ตัวอย่าง: task_02, stock_price
+
+- เรื่อง: .exception()
+  ใช้ทำอะไร: ดูว่า task พังด้วย error อะไร
+  ไฟล์ตัวอย่าง: task_02
+
+- เรื่อง: .add_done_callback()
+  ใช้ทำอะไร: ผูก function ให้ทำงานตอน task เสร็จ
+  ไฟล์ตัวอย่าง: task_04
+
+- เรื่อง: .get_name() / .set_name()
+  ใช้ทำอะไร: อ่าน/ตั้งชื่อ task
+  ไฟล์ตัวอย่าง: task_05, smart_courier
+
+- เรื่อง: asyncio.current_task()
+  ใช้ทำอะไร: ดู task ที่กำลังทำงานอยู่ตอนนี้
+  ไฟล์ตัวอย่าง: task_06
+
+- เรื่อง: asyncio.all_tasks()
+  ใช้ทำอะไร: ดู task ทั้งหมดใน event loop
+  ไฟล์ตัวอย่าง: task_06
+
+- เรื่อง: asyncio.gather()
+  ใช้ทำอะไร: รอหลายงานให้เสร็จทั้งหมด
+  ไฟล์ตัวอย่าง: task_07
+
+- เรื่อง: asyncio.wait()
+  ใช้ทำอะไร: รอหลายงานแบบควบคุมเงื่อนไขได้
+  ไฟล์ตัวอย่าง: task_08, stock_price
+
+- เรื่อง: asyncio.FIRST_COMPLETED
+  ใช้ทำอะไร: หยุดรอทันทีเมื่อมี task ตัวแรกเสร็จ
+  ไฟล์ตัวอย่าง: task_08, stock_price, stock_price_httpx
+
+- เรื่อง: asyncio.wait_for()
+  ใช้ทำอะไร: จำกัดเวลารอ ถ้าเกินให้ timeout
+  ไฟล์ตัวอย่าง: task_09
+
+- เรื่อง: httpx.AsyncClient()
+  ใช้ทำอะไร: ยิง HTTP request แบบ async
+  ไฟล์ตัวอย่าง: stock_price_httpx
+
+
+----------------------------------------------------------------
+
+2. คำศัพท์สำคัญก่อนอ่านโค้ด
+---------------------------
+
+- คำ: coroutine
+  ความหมายง่าย ๆ: function แบบ async ที่ยังไม่เริ่มทำงานจริงจนกว่าจะ await หรือ
+  create_task
+
+- คำ: task
+  ความหมายง่าย ๆ: coroutine ที่ถูกส่งเข้า event loop แล้ว พร้อมให้ระบบจัดการ
+
+- คำ: event loop
+  ความหมายง่าย ๆ: ตัวกลางที่คอยสลับงาน async หลายงาน
+
+- คำ: await
+  ความหมายง่าย ๆ: จุดที่งานยอมรอ และเปิดโอกาสให้งานอื่นทำต่อ
+
+- คำ: pending
+  ความหมายง่าย ๆ: task ที่ยังไม่เสร็จ
+
+- คำ: done
+  ความหมายง่าย ๆ: task ที่เสร็จแล้ว ไม่ว่าจะสำเร็จ พัง หรือถูกยกเลิก
+
+- คำ: cancel
+  ความหมายง่าย ๆ: การส่งสัญญาณให้ task หยุดทำงาน
+
+- คำ: callback
+  ความหมายง่าย ๆ: function ที่ถูกเรียกอัตโนมัติเมื่อ task เสร็จ
+
+- คำ: latency
+  ความหมายง่าย ๆ: ความหน่วง / เวลารอของ network หรือ server
+
+- คำ: HTTP request
+  ความหมายง่าย ๆ: การส่งคำขอไปยัง server เช่น GET /price/Beta
+
+
+----------------------------------------------------------------
+
+3. Example Section — task_01 ถึง task_10
+----------------------------------------
+
+ส่วนนี้คือไฟล์ตัวอย่างย่อยที่ปูพื้นก่อนทำ Lab จริงค่ะ
+
+----------------------------------------------------------------
+
+Example 1 — task_01_status.py
+-----------------------------
+
+แนวคิด
+------------
+
+ไฟล์นี้สอนการเช็กสถานะ task ว่า:
+
+- เสร็จหรือยังด้วย .done()
+- ถูกยกเลิกหรือยังด้วย .cancelled()
+
+Flow
+------------
+
+[โค้ด / แผนภาพ : text]
+สร้าง task -> เช็กทันที -> ยังไม่เสร็จ
+await task -> task เสร็จ
+เช็กอีกครั้ง -> done เป็น True
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ
+------------
+
+[โค้ด / แผนภาพ : python]
+task = asyncio.create_task(short_job())
+[จบโค้ด / แผนภาพ]
+
+บรรทัดนี้สร้าง task จาก coroutine short_job()
+
+[โค้ด / แผนภาพ : python]
+task.done()
+[จบโค้ด / แผนภาพ]
+
+ใช้ตอบว่า “งานเสร็จแล้วหรือยัง”
+
+[โค้ด / แผนภาพ : python]
+task.cancelled()
+[จบโค้ด / แผนภาพ]
+
+ใช้ตอบว่า “งานนี้ถูก cancel หรือเปล่า”
+
+Lab ย่อย
+------------
+
+ลองเปลี่ยน asyncio.sleep(1) เป็น asyncio.sleep(3) แล้วดูว่า .done() ก่อน await ยังเป็น
+False อยู่ไหม
+
+----------------------------------------------------------------
+
+Example 2 — task_02_exception.py
+--------------------------------
+
+แนวคิด
+------------
+
+ไฟล์นี้สอนว่า task มีได้ 2 แบบ:
+
+1. task สำเร็จ และมี result
+2. task พัง และมี exception
+
+Flow
+------------
+
+[โค้ด / แผนภาพ : text]
+สร้าง task_success -> 10 / 2 -> สำเร็จ
+สร้าง task_fail -> 10 / 0 -> ZeroDivisionError
+รอให้ทั้งคู่จบ
+อ่าน result ของตัวที่สำเร็จ
+อ่าน exception ของตัวที่พัง
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ
+------------
+
+[โค้ด / แผนภาพ : python]
+task_success.result()
+[จบโค้ด / แผนภาพ]
+
+อ่านค่าที่ coroutine return กลับมา
+
+[โค้ด / แผนภาพ : python]
+task_fail.exception()
+[จบโค้ด / แผนภาพ]
+
+อ่าน error ที่เกิดใน task โดยไม่ทำให้ main loop พังทันที
+
+Lab ย่อย
+------------
+
+ลองเปลี่ยน division_worker(10, 0) เป็น division_worker(10, 5) แล้วดูว่า exception
+หายไปไหม
+
+----------------------------------------------------------------
+
+Example 3 — task_03_cancel.py
+-----------------------------
+
+แนวคิด
+------------
+
+ไฟล์นี้สอนการหยุด task ที่กำลังทำงานไม่จบ เช่น loop ไม่รู้จบ
+
+Flow
+------------
+
+[โค้ด / แผนภาพ : text]
+background_loop เริ่มทำงาน
+main รอ 2.5 วินาที
+task.cancel()
+background_loop จับ CancelledError แล้ว print cleanup
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ
+------------
+
+[โค้ด / แผนภาพ : python]
+task.cancel()
+[จบโค้ด / แผนภาพ]
+
+ส่งสัญญาณยกเลิก task
+
+[โค้ด / แผนภาพ : python]
+except asyncio.CancelledError:
+[จบโค้ด / แผนภาพ]
+
+ใช้รับมือเมื่อ task ถูก cancel เพื่อ cleanup ก่อนออก
+
+Lab ย่อย
+------------
+
+ลองเปลี่ยนเวลารอใน main จาก 2.5 เป็น 4.5 แล้วดูว่า worker tick กี่ครั้งก่อนโดน cancel
+
+----------------------------------------------------------------
+
+Example 4 — task_04_callback.py
+-------------------------------
+
+แนวคิด
+------------
+
+ไฟล์นี้สอน callback คือ function ที่จะถูกเรียกอัตโนมัติเมื่อ task เสร็จ
+
+Flow
+------------
+
+[โค้ด / แผนภาพ : text]
+สร้าง task ดาวน์โหลดไฟล์
+ผูก callback ด้วย add_done_callback
+เมื่อ task เสร็จ callback จะอ่าน result แล้ว print
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ
+------------
+
+[โค้ด / แผนภาพ : python]
+task.add_done_callback(alert_manager)
+[จบโค้ด / แผนภาพ]
+
+แปลว่าเมื่อ task เสร็จ ให้เรียก alert_manager(task) อัตโนมัติ
+
+Lab ย่อย
+------------
+
+ลองเพิ่ม callback อีกตัว เช่น log_finished_task() แล้วผูก callback 2 ตัวกับ task
+เดียวกัน
+
+----------------------------------------------------------------
+
+Example 5 — task_05_nameing.py
+------------------------------
+
+หมายเหตุ: ชื่อไฟล์เป็น nameing ตามไฟล์จริงของโปรเจกต์ แม้คำอังกฤษมาตรฐานจะเป็น naming
+
+แนวคิด
+------------
+
+ไฟล์นี้สอนการตั้งชื่อ task เพื่อช่วย debug
+
+จุดสำคัญ
+------------
+
+[โค้ด / แผนภาพ : python]
+task.get_name()
+[จบโค้ด / แผนภาพ]
+
+อ่านชื่อ task ปัจจุบัน
+
+[โค้ด / แผนภาพ : python]
+task.set_name("Payment-Gateway-Validator")
+[จบโค้ด / แผนภาพ]
+
+เปลี่ยนชื่อ task ให้สื่อความหมาย
+
+Lab ย่อย
+------------
+
+ลองตั้งชื่อ task เป็นงานอื่น เช่น Email-Sender แล้วดู output ที่ได้
+
+----------------------------------------------------------------
+
+Example 6 — task_06_loop_introspection.py
+-----------------------------------------
+
+แนวคิด
+------------
+
+ไฟล์นี้สอนการดูว่าใน event loop ตอนนี้มี task อะไรทำงานอยู่บ้าง
+
+จุดสำคัญ
+------------
+
+[โค้ด / แผนภาพ : python]
+asyncio.current_task()
+[จบโค้ด / แผนภาพ]
+
+ดู task ปัจจุบันที่กำลังรันอยู่
+
+[โค้ด / แผนภาพ : python]
+asyncio.all_tasks()
+[จบโค้ด / แผนภาพ]
+
+ดู task ทั้งหมดที่ยัง active ใน loop
+
+Lab ย่อย
+------------
+
+ลองเปลี่ยน range(3) เป็น range(5) แล้วดูว่า Total Active Tasks เพิ่มขึ้นไหม
+
+----------------------------------------------------------------
+
+Example 7 — task_07_gather.py
+-----------------------------
+
+แนวคิด
+------------
+
+asyncio.gather() ใช้รันหลาย coroutine พร้อมกัน แล้วรอให้เสร็จทั้งหมด
+
+Flow
+------------
+
+[โค้ด / แผนภาพ : text]
+Users ใช้ 1.0 วิ
+Products ใช้ 0.5 วิ
+Invoices ใช้ 1.0 วิ
+gather รอทั้งหมด
+คืน list ผลลัพธ์ตามลำดับที่ส่งเข้าไป
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ
+------------
+
+[โค้ด / แผนภาพ : python]
+results = await asyncio.gather(...)
+[จบโค้ด / แผนภาพ]
+
+แม้ Products จะเสร็จก่อน แต่ list ยังเรียงตามลำดับที่เราใส่เข้าไป
+
+Lab ย่อย
+------------
+
+ลองเพิ่ม fetch_db_record("Orders", 0.2) แล้วดูว่า output list มี 4 รายการไหม
+
+----------------------------------------------------------------
+
+Example 8 — task_08_wait.py
+---------------------------
+
+แนวคิด
+------------
+
+asyncio.wait() ใช้รอหลาย task แบบเลือกเงื่อนไขได้ เช่น “ใครเสร็จก่อนชนะ”
+
+จุดสำคัญ
+------------
+
+[โค้ด / แผนภาพ : python]
+done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+[จบโค้ด / แผนภาพ]
+
+แปลว่า:
+
+- done = task ที่เสร็จแล้ว
+- pending = task ที่ยังไม่เสร็จ
+- FIRST_COMPLETED = หยุดรอทันทีเมื่อมีตัวแรกเสร็จ
+
+Lab ย่อย
+------------
+
+ลองเปลี่ยน delay ของ Backup-Server-2 เป็น 0.2 แล้วดูว่าผู้ชนะเปลี่ยนไหม
+
+----------------------------------------------------------------
+
+Example 9 — task_09_wait_for.py
+-------------------------------
+
+แนวคิด
+------------
+
+asyncio.wait_for() ใช้จำกัดเวลารอ task
+
+Flow
+------------
+
+[โค้ด / แผนภาพ : text]
+long_query_simulation ใช้ 5 วินาที
+main ให้รอแค่ 2 วินาที
+เกินเวลา -> TimeoutError
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ
+------------
+
+[โค้ด / แผนภาพ : python]
+await asyncio.wait_for(long_query_simulation(), timeout=2.0)
+[จบโค้ด / แผนภาพ]
+
+ถ้างานไม่เสร็จใน 2 วินาที จะโยน asyncio.TimeoutError
+
+Lab ย่อย
+------------
+
+ลองเปลี่ยน timeout เป็น 6.0 แล้วดูว่าโปรแกรมได้ result แทน timeout ไหม
+
+----------------------------------------------------------------
+
+Example 10 — task_10_gather_vs_wait.py
+--------------------------------------
+
+แนวคิด
+------------
+
+ไฟล์นี้เทียบ gather() กับ wait()
+
+- คำสั่ง: gather()
+  เหมาะกับอะไร: ต้องการผลลัพธ์ครบทุกงาน
+
+- คำสั่ง: wait(... FIRST_COMPLETED)
+  เหมาะกับอะไร: ต้องการแค่ผู้ชนะ / ตัวแรกที่เสร็จ
+
+
+Flow
+------------
+
+ช่วงแรกใช้ gather():
+
+[โค้ด / แผนภาพ : text]
+A ใช้ 0.5 วิ
+B ใช้ 2.0 วิ
+รอทั้งคู่จบ
+[จบโค้ด / แผนภาพ]
+
+ช่วงสองใช้ wait():
+
+[โค้ด / แผนภาพ : text]
+A ใช้ 0.5 วิ
+B ใช้ 2.0 วิ
+A เสร็จก่อน -> ประกาศผู้ชนะ
+cancel B
+[จบโค้ด / แผนภาพ]
+
+Lab ย่อย
+------------
+
+ลองเปลี่ยน speed ของ B เป็น 0.1 แล้วดูว่าผู้ชนะเปลี่ยนเป็น B หรือไม่
+
+----------------------------------------------------------------
+
+4. Lab Section — Assignment 1: smart_courier.py
+-----------------------------------------------
+
+4.1 เป้าหมายของ Lab
+-------------------
+
+จำลองระบบพนักงานส่งพัสดุด่วน 1 คน ที่ต้องส่งของแบบ async
+
+ถ้าส่งนานเกิน 2 วินาที โปรแกรมหลักจะยกเลิกงานทันที
+
+----------------------------------------------------------------
+
+4.2 Library ที่ใช้
+------------------
+
+[โค้ด / แผนภาพ : python]
+import asyncio
+from time import ctime
+[จบโค้ด / แผนภาพ]
+
+- library: asyncio
+  ใช้ทำอะไร: สร้าง task, sleep แบบ async, cancel task
+
+- library: ctime
+  ใช้ทำอะไร: แสดงเวลาปัจจุบันใน output
+
+
+----------------------------------------------------------------
+
+4.3 Function: delivery_task(package_id, duration)
+-------------------------------------------------
+
+หน้าที่: จำลองการส่งพัสดุ
+
+[โค้ด / แผนภาพ : python]
+async def delivery_task(package_id, duration):
+[จบโค้ด / แผนภาพ]
+
+- parameter: package_id
+  ความหมาย: รหัสพัสดุ
+  ค่าที่ใช้ใน lab: "P001"
+
+- parameter: duration
+  ความหมาย: เวลาที่ใช้ส่งพัสดุ
+  ค่าที่ใช้ใน lab: 5.0 วินาที
+
+
+ใน function นี้มี 2 กรณี:
+
+กรณีส่งสำเร็จ
+-------------
+
+[โค้ด / แผนภาพ : python]
+await asyncio.sleep(duration)
+return f"Package {package_id} Delivered!"
+[จบโค้ด / แผนภาพ]
+
+ถ้าไม่มีใคร cancel task งานจะรอครบ duration แล้ว return ข้อความสำเร็จ
+
+กรณีถูกยกเลิก
+-------------
+
+[โค้ด / แผนภาพ : python]
+except asyncio.CancelledError:
+    print(...)
+    raise
+[จบโค้ด / แผนภาพ]
+
+เมื่อ task ถูก cancel จะเข้ามาใน except แล้ว print:
+
+[โค้ด / แผนภาพ : text]
+Delivery Canceled! Returning package to warehouse.
+[จบโค้ด / แผนภาพ]
+
+แล้ว raise ต่อ เพื่อให้ task มีสถานะ cancelled จริง
+
+----------------------------------------------------------------
+
+4.4 Function: main()
+--------------------
+
+หน้าที่: สร้าง task, รอ 2 วินาที, ตรวจสถานะ, แล้ว cancel ถ้ายังไม่เสร็จ
+
+สร้าง task
+------------
+
+[โค้ด / แผนภาพ : python]
+task = asyncio.create_task(
+    delivery_task(package_id="P001", duration=5.0),
+    name="Express-Courier"
+)
+[จบโค้ด / แผนภาพ]
+
+แปลว่า:
+
+- ส่งพัสดุ P001
+- ใช้เวลาจำลอง 5.0 วินาที
+- ตั้งชื่อ task ว่า Express-Courier
+
+รอก่อนตรวจ
+------------
+
+[โค้ด / แผนภาพ : python]
+await asyncio.sleep(2.0)
+[จบโค้ด / แผนภาพ]
+
+main รอแค่ 2 วินาที แต่ delivery ใช้ 5 วินาที ดังนั้น task จะยังไม่เสร็จ
+
+ตรวจสถานะ
+------------
+
+[โค้ด / แผนภาพ : python]
+task.done()
+[จบโค้ด / แผนภาพ]
+
+จะได้ False
+
+ยกเลิก
+------------
+
+[โค้ด / แผนภาพ : python]
+task.cancel()
+[จบโค้ด / แผนภาพ]
+
+ส่งสัญญาณ cancel ไปยัง task
+
+ตรวจสุดท้าย
+------------
+
+[โค้ด / แผนภาพ : python]
+task.cancelled()
+[จบโค้ด / แผนภาพ]
+
+จะได้ True เมื่อ task ถูกยกเลิกสำเร็จ
+
+----------------------------------------------------------------
+
+4.5 Expected Output
+-------------------
+
+เวลาจะเปลี่ยนตามเครื่อง แต่ข้อความหลักควรเป็นแบบนี้:
+
+[โค้ด / แผนภาพ : text]
+Wed Jul  8 11:05:46 2026 Courier started delivering P001...
+Wed Jul  8 11:05:48 2026 Checking task 'Express-Courier'. Is it done? False
+Wed Jul  8 11:05:48 2026 Taking too long! Canceling the task...
+Wed Jul  8 11:05:48 2026 Delivery Canceled! Returning package to warehouse.
+Wed Jul  8 11:05:48 2026 Final verify: Is task officially canceled? True
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+4.6 Lab Practice
+----------------
+
+1. เปลี่ยน duration=5.0 เป็น duration=1.0
+2. รันใหม่
+3. สังเกตว่า task จะเสร็จก่อน 2 วินาทีไหม
+4. ถ้าเสร็จก่อน .done() จะเป็น True และไม่ควรถูก cancel
+
+ถ้าทำ lab นี้จริง ต้องคิดต่อว่า code ควร handle กรณีส่งสำเร็จยังไง
+แต่ไฟล์ปัจจุบันออกแบบมาเพื่อโชว์กรณี cancel เป็นหลักค่ะ
+
+----------------------------------------------------------------
+
+5. Lab Section — Assignment 2: stock_price.py
+---------------------------------------------
+
+5.1 เป้าหมายของ Lab
+-------------------
+
+จำลองการแข่งขันดึงราคาหุ้นจาก server 3 ตัว โดยไม่ใช้ network จริง
+
+server ทั้ง 3 ตัวมี delay ต่างกัน:
+
+- Server: Alpha
+  Delay: 3.0 วินาที
+  คาดหวัง: ช้าที่สุด
+
+- Server: Beta
+  Delay: 0.8 วินาที
+  คาดหวัง: เร็วที่สุด / ผู้ชนะ
+
+- Server: Gamma
+  Delay: 1.5 วินาที
+  คาดหวัง: ปานกลาง
+
+
+----------------------------------------------------------------
+
+5.2 Function: fetch_stock_price(server_name, delay)
+---------------------------------------------------
+
+[โค้ด / แผนภาพ : python]
+async def fetch_stock_price(server_name, delay):
+    await asyncio.sleep(delay)
+    return f"[{server_name}] Price: 150 USD"
+[จบโค้ด / แผนภาพ]
+
+หน้าที่:
+
+1. รับชื่อ server
+2. รับ delay
+3. รอด้วย asyncio.sleep(delay)
+4. return ราคาหุ้นจำลอง
+
+----------------------------------------------------------------
+
+5.3 ทำไมต้องใช้ asyncio.wait()
+------------------------------
+
+โจทย์ต้องการ logic แบบ “ใครเสร็จก่อนชนะ”
+
+จึงใช้:
+
+[โค้ด / แผนภาพ : python]
+done, pending = await asyncio.wait(
+    tasks,
+    return_when=asyncio.FIRST_COMPLETED
+)
+[จบโค้ด / แผนภาพ]
+
+เหตุผลที่ไม่ใช้ gather():
+
+- คำสั่ง: gather()
+  ผลลัพธ์: รอทุก server เสร็จทั้งหมด
+
+- คำสั่ง: wait(... FIRST_COMPLETED)
+  ผลลัพธ์: รอแค่ server ตัวแรกที่เสร็จ
+
+
+สำหรับโจทย์นี้ต้องการตัวแรก จึงใช้ wait() ค่ะ
+
+----------------------------------------------------------------
+
+5.4 ทำไมต้อง cancel pending task
+--------------------------------
+
+หลังจาก Beta ชนะแล้ว Alpha และ Gamma ยังอาจกำลังรออยู่
+
+ถ้าไม่ cancel:
+
+- งานที่เหลือจะยังค้างใน event loop
+- เปลือง resource
+- เป็นนิสัยที่ไม่ดีในการเขียนระบบจริง
+
+จึงใช้:
+
+[โค้ด / แผนภาพ : python]
+for pending_task in pending:
+    pending_task.cancel()
+[จบโค้ด / แผนภาพ]
+
+และตามด้วย:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.gather(*pending, return_exceptions=True)
+[จบโค้ด / แผนภาพ]
+
+เพื่อให้ task ที่ถูก cancel เคลียร์ตัวเองจนจบ ไม่ทิ้ง warning ค้างไว้
+
+----------------------------------------------------------------
+
+5.5 Expected Output
+-------------------
+
+[โค้ด / แผนภาพ : text]
+Wed Jul  8 11:11:53 2026 Winner Result: [Beta] Price: 150 USD
+Wed Jul  8 11:11:53 2026 Cleaning up 2 pending tasks...
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+5.6 Lab Practice
+----------------
+
+Lab A — เปลี่ยนผู้ชนะ
+---------------------
+
+ลองเปลี่ยน delay:
+
+[โค้ด / แผนภาพ : python]
+asyncio.create_task(fetch_stock_price("Gamma", 0.3))
+[จบโค้ด / แผนภาพ]
+
+แล้วดูว่า Winner เปลี่ยนเป็น Gamma หรือไม่
+
+Lab B — เพิ่ม server
+--------------------
+
+เพิ่ม server อีกตัว:
+
+[โค้ด / แผนภาพ : python]
+asyncio.create_task(fetch_stock_price("Delta", 0.2))
+[จบโค้ด / แผนภาพ]
+
+แล้วสังเกตว่า:
+
+- Winner ควรเป็น Delta
+- pending tasks จะกลายเป็น 3 ตัว
+
+----------------------------------------------------------------
+
+6. Lab Section — Assignment 3 API Server: stock_api.py
+------------------------------------------------------
+
+6.1 เป้าหมายของไฟล์นี้
+----------------------
+
+stock_api.py เป็น server จำลองราคาหุ้นด้วย FastAPI
+
+ไฟล์นี้ไม่ได้เป็นตัวแข่งเอง แต่เป็น “ปลายทาง” ให้ stock_price_httpx.py ยิง HTTP request
+เข้ามา
+
+----------------------------------------------------------------
+
+6.2 Endpoint สำคัญ
+------------------
+
+[โค้ด / แผนภาพ : python]
+@app.get("/price/{server_name}")
+[จบโค้ด / แผนภาพ]
+
+แปลว่า endpoint มีรูปแบบ:
+
+[โค้ด / แผนภาพ : text]
+/price/Alpha
+/price/Beta
+/price/Gamma
+[จบโค้ด / แผนภาพ]
+
+ถ้ารันที่เครื่องตัวเอง port 8088 URL จะเป็น:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8088/price/Beta
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+6.3 Function: get_stock_price(server_name: str)
+-----------------------------------------------
+
+หน้าที่:
+
+1. รับชื่อ server จาก URL
+2. แปลงเป็นตัวเล็กด้วย .lower()
+3. เลือก delay และ price ตามชื่อ server
+4. return JSON กลับไป
+
+----------------------------------------------------------------
+
+6.4 ตารางค่า delay และราคา
+--------------------------
+
+- server: Alpha
+  delay: 3.0
+  price_usd: 152.50
+  ความหมาย: ช้าที่สุด
+
+- server: Beta
+  delay: 0.8
+  price_usd: 149.80
+  ความหมาย: เร็วที่สุด
+
+- server: Gamma
+  delay: 1.5
+  price_usd: 150.20
+  ความหมาย: ปานกลาง
+
+- server: อื่น ๆ
+  delay: 0.1
+  price_usd: 100.00
+  ความหมาย: ค่า default
+
+
+----------------------------------------------------------------
+
+6.5 JSON ที่ API ส่งกลับ
+------------------------
+
+ตัวอย่างเมื่อเรียก:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8088/price/Beta
+[จบโค้ด / แผนภาพ]
+
+จะได้ประมาณ:
+
+[โค้ด / แผนภาพ : json]
+{
+  "server": "Beta",
+  "price_usd": 149.8,
+  "status": "success"
+}
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+6.6 วิธีรัน API Server
+----------------------
+
+จากโฟลเดอร์ Week3:
+
+[โค้ด / แผนภาพ : bash]
+python stock_api.py
+[จบโค้ด / แผนภาพ]
+
+หรือ:
+
+[โค้ด / แผนภาพ : bash]
+uvicorn stock_api:app --reload --port 8088
+[จบโค้ด / แผนภาพ]
+
+ถ้ารันสำเร็จจะเห็นประมาณ:
+
+[โค้ด / แผนภาพ : text]
+Uvicorn running on http://0.0.0.0:8088
+Application startup complete.
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+6.7 Lab Practice
+----------------
+
+Lab A — เปิด API docs
+---------------------
+
+เปิด browser ไปที่:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8088/docs
+[จบโค้ด / แผนภาพ]
+
+จะเห็นหน้า Swagger UI ของ FastAPI
+
+Lab B — ทดลอง endpoint
+----------------------
+
+เปิด:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8088/price/Alpha
+http://127.0.0.1:8088/price/Beta
+http://127.0.0.1:8088/price/Gamma
+[จบโค้ด / แผนภาพ]
+
+แล้วดูว่าแต่ละตัวตอบช้าต่างกันไหม
+
+----------------------------------------------------------------
+
+7. Lab Section — Assignment 3 Client: stock_price_httpx.py
+----------------------------------------------------------
+
+7.1 เป้าหมายของไฟล์นี้
+----------------------
+
+ไฟล์นี้คือ client ที่ยิง request ไปหา stock_api.py พร้อมกัน 3 ตัว
+แล้วเลือกตัวที่ตอบกลับเร็วที่สุด
+
+ต่างจาก stock_price.py ตรงนี้:
+
+- ไฟล์: stock_price.py
+  ใช้ข้อมูลจากไหน: mock delay ด้วย asyncio.sleep() ในไฟล์เดียว
+
+- ไฟล์: stock_price_httpx.py
+  ใช้ข้อมูลจากไหน: ยิง HTTP request ไปหา FastAPI server จริง
+
+
+----------------------------------------------------------------
+
+7.2 Function: fetch_stock_price(server_name: str)
+-------------------------------------------------
+
+[โค้ด / แผนภาพ : python]
+async def fetch_stock_price(server_name: str):
+[จบโค้ด / แผนภาพ]
+
+รับแค่ server_name ตามโจทย์ ไม่รับ delay
+
+เหตุผล: delay อยู่ที่ API server แล้ว ไม่ได้อยู่ใน client
+
+----------------------------------------------------------------
+
+7.3 URL
+------------
+
+ในโค้ดจริงล่าสุดของใบใช้:
+
+[โค้ด / แผนภาพ : python]
+url = f"http://127.0.0.1:8088/price/{server_name}"
+[จบโค้ด / แผนภาพ]
+
+ความหมาย:
+
+- 127.0.0.1 = เครื่องตัวเอง
+- 8088 = port ของ FastAPI server
+- /price/{server_name} = endpoint ที่รับชื่อ server
+
+ถ้าอาจารย์กำหนดให้ใช้ IP กลาง เช่น:
+
+[โค้ด / แผนภาพ : text]
+http://172.16.2.117:8088/price/{server_name}
+[จบโค้ด / แผนภาพ]
+
+ให้เปลี่ยนเฉพาะส่วน host จาก 127.0.0.1 เป็น 172.16.2.117 เมื่อ server
+ปลายทางเปิดและเครื่องใบเข้าถึง network นั้นได้จริง
+
+----------------------------------------------------------------
+
+7.4 ใช้ httpx.AsyncClient() ทำไม
+--------------------------------
+
+[โค้ด / แผนภาพ : python]
+async with httpx.AsyncClient() as client:
+    response = await client.get(url)
+[จบโค้ด / แผนภาพ]
+
+เหตุผล:
+
+- ยิง request แบบ async ได้
+- ระหว่างรอ network event loop ไปดู task อื่นต่อได้
+- เหมาะกับการแข่ง request หลายตัวพร้อมกัน
+
+----------------------------------------------------------------
+
+7.5 แปลง JSON เป็นข้อความ
+-------------------------
+
+[โค้ด / แผนภาพ : python]
+data = response.json()
+return f"[{data['server']}] Price: {data['price_usd']} USD"
+[จบโค้ด / แผนภาพ]
+
+API ส่ง JSON เช่น:
+
+[โค้ด / แผนภาพ : json]
+{"server":"Beta","price_usd":149.8,"status":"success"}
+[จบโค้ด / แผนภาพ]
+
+client เอามาจัด format เป็น:
+
+[โค้ด / แผนภาพ : text]
+[Beta] Price: 149.8 USD
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+7.6 Concurrency Racing
+----------------------
+
+ใน main() สร้าง task 3 ตัวพร้อมกัน:
+
+[โค้ด / แผนภาพ : python]
+tasks = {
+    asyncio.create_task(fetch_stock_price("Alpha")),
+    asyncio.create_task(fetch_stock_price("Beta")),
+    asyncio.create_task(fetch_stock_price("Gamma"))
+}
+[จบโค้ด / แผนภาพ]
+
+แล้วรอแบบ:
+
+[โค้ด / แผนภาพ : python]
+done, pending = await asyncio.wait(
+    tasks,
+    return_when=asyncio.FIRST_COMPLETED
+)
+[จบโค้ด / แผนภาพ]
+
+แปลว่า request ที่ตอบเร็วที่สุดจะชนะ และ request ที่เหลือจะถูก cancel
+
+----------------------------------------------------------------
+
+7.7 Expected Output
+-------------------
+
+เมื่อเปิด stock_api.py อยู่ก่อน แล้วรัน stock_price_httpx.py:
+
+[โค้ด / แผนภาพ : text]
+Wed Jul  8 11:05:53 2026 Winner Result: [Beta] Price: 149.8 USD
+Wed Jul  8 11:05:53 2026 Cleaning up 2 pending tasks...
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+7.8 Lab Practice
+----------------
+
+Lab A — เปลี่ยน URL เป็น IP อาจารย์
+-----------------------------------
+
+ถ้า server ของอาจารย์เปิดที่ 172.16.2.117:8088 ให้แก้ URL เป็น:
+
+[โค้ด / แผนภาพ : python]
+url = f"http://172.16.2.117:8088/price/{server_name}"
+[จบโค้ด / แผนภาพ]
+
+แล้วรัน:
+
+[โค้ด / แผนภาพ : bash]
+python Week3/stock_price_httpx.py
+[จบโค้ด / แผนภาพ]
+
+ถ้า timeout แปลว่า network หรือ server ปลายทางยังไม่พร้อม ไม่ใช่ logic Python ผิดเสมอไป
+
+Lab B — ทดสอบ API ก่อนรัน client
+--------------------------------
+
+ก่อนรัน client ให้ลองเปิด:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8088/price/Beta
+[จบโค้ด / แผนภาพ]
+
+ถ้าได้ JSON แปลว่า server พร้อม
+
+----------------------------------------------------------------
+
+8. วิธีรันทั้งชุด
+-----------------
+
+8.1 รัน Assignment 1
+--------------------
+
+[โค้ด / แผนภาพ : bash]
+python Week3/smart_courier.py
+[จบโค้ด / แผนภาพ]
+
+8.2 รัน Assignment 2
+--------------------
+
+[โค้ด / แผนภาพ : bash]
+python Week3/stock_price.py
+[จบโค้ด / แผนภาพ]
+
+8.3 รัน Assignment 3 แบบ HTTPX
+------------------------------
+
+ต้องเปิด API server ก่อน 1 terminal:
+
+[โค้ด / แผนภาพ : bash]
+cd Week3
+python stock_api.py
+[จบโค้ด / แผนภาพ]
+
+จากนั้นเปิดอีก terminal แล้วรัน:
+
+[โค้ด / แผนภาพ : bash]
+python Week3/stock_price_httpx.py
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+9. Debug Checklist
+------------------
+
+ถ้าโปรแกรมไม่ทำงาน ให้ไล่เช็กแบบนี้:
+
+- อาการ: ModuleNotFoundError: fastapi
+  น่าจะเกิดจาก: ยังไม่ได้ติดตั้ง FastAPI
+  วิธีเช็ก: pip install fastapi uvicorn httpx
+
+- อาการ: ModuleNotFoundError: httpx
+  น่าจะเกิดจาก: ยังไม่ได้ติดตั้ง httpx
+  วิธีเช็ก: pip install httpx
+
+- อาการ: ConnectTimeout
+  น่าจะเกิดจาก: client หา API server ไม่เจอ
+  วิธีเช็ก: เช็กว่า stock_api.py รันอยู่ไหม
+
+- อาการ: Connection refused
+  น่าจะเกิดจาก: port ไม่มี server ฟังอยู่
+  วิธีเช็ก: เปิด python stock_api.py ก่อน
+
+- อาการ: ได้ output ไม่ใช่ Beta
+  น่าจะเกิดจาก: delay ของ server เปลี่ยน
+  วิธีเช็ก: ดู delay ใน stock_api.py หรือ stock_price.py
+
+- อาการ: ไม่มีบรรทัด Cleaning up
+  น่าจะเกิดจาก: ยังไม่ได้ print ก่อน cancel pending
+  วิธีเช็ก: ดูส่วนหลัง asyncio.wait()
+
+
+----------------------------------------------------------------
+
+10. สรุปจำง่าย
+--------------
+
+- ไฟล์: task_01_status.py
+  จำง่าย ๆ ว่า: เช็ก task เสร็จหรือยัง
+
+- ไฟล์: task_02_exception.py
+  จำง่าย ๆ ว่า: อ่าน result และ exception
+
+- ไฟล์: task_03_cancel.py
+  จำง่าย ๆ ว่า: cancel task ที่ทำงานไม่จบ
+
+- ไฟล์: task_04_callback.py
+  จำง่าย ๆ ว่า: ให้ function ทำงานตอน task เสร็จ
+
+- ไฟล์: task_05_nameing.py
+  จำง่าย ๆ ว่า: ตั้งชื่อ task
+
+- ไฟล์: task_06_loop_introspection.py
+  จำง่าย ๆ ว่า: ดู task ใน event loop
+
+- ไฟล์: task_07_gather.py
+  จำง่าย ๆ ว่า: รอทุกงานให้เสร็จ
+
+- ไฟล์: task_08_wait.py
+  จำง่าย ๆ ว่า: รอแบบมีเงื่อนไข เช่น ตัวแรกเสร็จ
+
+- ไฟล์: task_09_wait_for.py
+  จำง่าย ๆ ว่า: จำกัดเวลารอ
+
+- ไฟล์: task_10_gather_vs_wait.py
+  จำง่าย ๆ ว่า: เทียบ gather กับ wait
+
+- ไฟล์: smart_courier.py
+  จำง่าย ๆ ว่า: ส่งพัสดุ ถ้านานเกินให้ cancel
+
+- ไฟล์: stock_price.py
+  จำง่าย ๆ ว่า: แข่งราคาหุ้นแบบ mock sleep
+
+- ไฟล์: stock_api.py
+  จำง่าย ๆ ว่า: API server จำลองราคา
+
+- ไฟล์: stock_price_httpx.py
+  จำง่าย ๆ ว่า: client ยิง HTTP request แบบ async
+
+
+----------------------------------------------------------------
+
+11. แบบฝึกหัดรวมท้ายบท
+----------------------
+
+Exercise 1 — อธิบายด้วยคำพูดตัวเอง
+----------------------------------
+
+ตอบคำถาม:
+
+1. .done() ต่างจาก .cancelled() ยังไง
+2. ทำไม stock_price.py ใช้ wait() แทน gather()
+3. ทำไมต้อง cancel pending task
+4. ทำไม stock_price_httpx.py ไม่รับ parameter delay
+
+----------------------------------------------------------------
+
+Exercise 2 — เปลี่ยนผู้ชนะ
+--------------------------
+
+ใน stock_price.py ลองทำให้ Gamma ชนะโดยไม่เปลี่ยนชื่อ function
+
+แนวทาง:
+
+[โค้ด / แผนภาพ : python]
+asyncio.create_task(fetch_stock_price("Gamma", 0.3))
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+Exercise 3 — ทดสอบ network จริง
+-------------------------------
+
+1. เปิด stock_api.py
+2. เปิด browser ไปที่ /price/Beta
+3. รัน stock_price_httpx.py
+4. อธิบายว่าทำไม Beta ถึงชนะ
+
+----------------------------------------------------------------
+
+12. ข้อควรระวัง
+---------------
+
+1. อย่าใช้ time.sleep() ใน async function เพราะจะบล็อก event loop
+2. ถ้าใช้ wait(... FIRST_COMPLETED) แล้วต้องการหยุดงานที่เหลือ ควร cancel pending
+3. ถ้า cancel แล้วไม่ await/gather pending ต่อ อาจมี warning ได้ในบางสถานการณ์
+4. ถ้า HTTPX timeout ให้เช็ก network และ API server ก่อน ไม่ใช่แก้ logic ทันที
+5. ถ้าเปลี่ยน URL เป็น IP อื่น ต้องแน่ใจว่าเครื่องนั้นเปิด port 8088 จริง
+
+----------------------------------------------------------------
+
+13. คำสั่งตรวจงาน
+-----------------
+
+ตรวจ syntax:
+
+[โค้ด / แผนภาพ : bash]
+python -m py_compile Week3/smart_courier.py Week3/stock_price.py Week3/stock_api.py Week3/stock_price_httpx.py
+[จบโค้ด / แผนภาพ]
+
+รันโปรแกรมหลัก:
+
+[โค้ด / แผนภาพ : bash]
+python Week3/smart_courier.py
+python Week3/stock_price.py
+[จบโค้ด / แผนภาพ]
+
+รัน API + HTTPX:
+
+[โค้ด / แผนภาพ : bash]
+cd Week3
+python stock_api.py
+[จบโค้ด / แผนภาพ]
+
+อีก terminal:
+
+[โค้ด / แผนภาพ : bash]
+python Week3/stock_price_httpx.py
+[จบโค้ด / แผนภาพ]
+
+ถ้าทุกอย่างถูกต้อง จะเห็นว่า:
+
+- smart_courier.py ถูก cancel สำเร็จ
+- stock_price.py ได้ Beta เป็น winner ราคา 150 USD
+- stock_price_httpx.py ได้ Beta เป็น winner ราคา 149.8 USD
+- ทั้งสอง stock program มีบรรทัด Cleaning up 2 pending tasks...
+
+========================================================================
+อ่านละเอียด — คู่มือเดิมจาก Week4_Asyncio_Smart_Food_Court_Guide.md
+คำสั่งติดตั้ง/ส่ง request เป็นตัวอย่างสำหรับเตรียม lab ไม่ใช่สิ่งที่ได้รันในการตรวจหนังสือ
+endpoint และค่าห้องเรียนต้องตรวจใหม่ก่อนใช้งาน
+
+Week 4 Asyncio Smart Food Court Study Guide
+===========================================
+
+คู่มือนี้อธิบายจาก โค้ดจริงล่าสุด ในโฟลเดอร์ Week4 ของใบค่ะ
+เหมาะสำหรับอ่านตั้งแต่ยังไม่รู้พื้นฐาน และใช้ทบทวนก่อนสอบเรื่อง asyncio, HTTP API,
+timeout และการจัดการหลาย Task
+
+ไฟล์ที่ใช้เรียนมี 7 ไฟล์:
+
+- Week4/foodcourt_api.py
+- Week4/food_utils.py
+- Week4/foodcourt_01_create_task.py
+- Week4/foodcourt_02_gather.py
+- Week4/foodcourt_03_wait_first.py
+- Week4/foodcourt_04_wait_for.py
+- Week4/foodcourt_05_mix_concepts.py
+
+เป้าหมาย: อ่านจบแล้วอธิบายได้ว่า Client ส่งออเดอร์ไปยัง API อย่างไร, create_task(),
+gather(), wait() และ wait_for() ต่างกันอย่างไร รวมถึงเลือกใช้ให้เหมาะกับโจทย์ได้ค่ะ
+
+----------------------------------------------------------------
+
+1. Week 4 กำลังเรียนเรื่องอะไร
+------------------------------
+
+Week 2 สอนพื้นฐานการสร้างงาน async และ Week 3 สอนการควบคุม Task ส่วน Week 4
+นำแนวคิดเหล่านั้นมาใช้กับ HTTP API จริง
+
+ระบบจำลองศูนย์อาหารมีองค์ประกอบหลัก 2 ฝั่ง:
+
+1. Client — โปรแกรมของนักศึกษาที่ส่งออเดอร์
+2. Server — FastAPI ที่รับออเดอร์และจำลองเวลาทำอาหาร
+
+ภาพรวมการทำงาน:
+
+[โค้ด / แผนภาพ : text]
+foodcourt_01 ถึง foodcourt_05
+            |
+            | เรียก send_order_to_kitchen(...)
+            v
+       food_utils.py
+            |
+            | HTTP POST + JSON
+            v
+      foodcourt_api.py
+            |
+            | await asyncio.sleep(cooking_time)
+            v
+        ส่ง JSON กลับ
+[จบโค้ด / แผนภาพ]
+
+สิ่งใหม่ที่สำคัญใน Week 4:
+
+- ส่ง HTTP request แบบ async ด้วย httpx.AsyncClient
+- สร้าง API server ด้วย FastAPI
+- ส่งข้อมูลในรูป JSON
+- ส่งหลายออเดอร์พร้อมกัน
+- รอทุกออเดอร์ หรือรอเฉพาะจานแรก
+- กำหนด timeout ให้คำสั่งซื้อ
+- ยกเลิก Task ที่ไม่ต้องการแล้ว
+
+----------------------------------------------------------------
+
+2. คำศัพท์พื้นฐาน
+-----------------
+
+- คำ: Client
+  ความหมายแบบง่าย: ฝั่งที่ส่งคำขอ
+  ตัวอย่างใน Week 4: foodcourt_01–foodcourt_05
+
+- คำ: Server
+  ความหมายแบบง่าย: ฝั่งที่รับและประมวลผลคำขอ
+  ตัวอย่างใน Week 4: foodcourt_api.py
+
+- คำ: API
+  ความหมายแบบง่าย: ช่องทางที่โปรแกรมใช้คุยกัน
+  ตัวอย่างใน Week 4: POST /order/{shop_name}
+
+- คำ: Endpoint
+  ความหมายแบบง่าย: Method + path ที่เปิดให้เรียก
+  ตัวอย่างใน Week 4: POST /order/steak
+
+- คำ: HTTP POST
+  ความหมายแบบง่าย: request ที่ใช้ส่งข้อมูลไปให้ server
+  ตัวอย่างใน Week 4: ส่งรหัสนักศึกษาและชื่อเมนู
+
+- คำ: Request
+  ความหมายแบบง่าย: ข้อมูลที่ client ส่งไป
+  ตัวอย่างใน Week 4: URL และ JSON payload
+
+- คำ: Response
+  ความหมายแบบง่าย: ข้อมูลที่ server ตอบกลับ
+  ตัวอย่างใน Week 4: JSON สถานะ READY_FOR_PICKUP
+
+- คำ: JSON
+  ความหมายแบบง่าย: รูปแบบข้อมูล key-value
+  ตัวอย่างใน Week 4: {"student_id": "..."}
+
+- คำ: Latency
+  ความหมายแบบง่าย: เวลาหน่วงก่อนตอบกลับ
+  ตัวอย่างใน Week 4: ร้าน steak ใช้ 4.0 วินาที
+
+- คำ: Coroutine
+  ความหมายแบบง่าย: งานที่ประกาศด้วย async def
+  ตัวอย่างใน Week 4: send_order_to_kitchen()
+
+- คำ: Task
+  ความหมายแบบง่าย: Coroutine ที่ถูกส่งเข้า event loop แล้ว
+  ตัวอย่างใน Week 4: ผลจาก asyncio.create_task()
+
+- คำ: Event loop
+  ความหมายแบบง่าย: ตัวจัดคิวและสลับงาน async
+  ตัวอย่างใน Week 4: เริ่มด้วย asyncio.run(main())
+
+- คำ: Timeout
+  ความหมายแบบง่าย: เวลารอสูงสุด
+  ตัวอย่างใน Week 4: timeout=2.0
+
+- คำ: Pending
+  ความหมายแบบง่าย: Task ที่ยังไม่เสร็จ
+  ตัวอย่างใน Week 4: ร้าน noodle/steak ตอนข้าวมันไก่เสร็จก่อน
+
+- คำ: Cancel
+  ความหมายแบบง่าย: ส่งสัญญาณยกเลิก Task
+  ตัวอย่างใน Week 4: task.cancel()
+
+
+----------------------------------------------------------------
+
+3. ข้อมูลร้านและเวลาทำอาหาร
+---------------------------
+
+ค่าจริงมาจาก KITCHEN_LATENCY ใน foodcourt_api.py:
+
+- shop_name: hainanese_chicken
+  เมนูตัวอย่าง: ข้าวมันไก่
+  เวลาจำลอง: 0.8 วินาที
+  ลำดับความเร็ว: เร็วที่สุด
+
+- shop_name: noodle
+  เมนูตัวอย่าง: ก๋วยเตี๋ยว
+  เวลาจำลอง: 1.5 วินาที
+  ลำดับความเร็ว: ปานกลาง
+
+- shop_name: steak
+  เมนูตัวอย่าง: สเต็ก
+  เวลาจำลอง: 4.0 วินาที
+  ลำดับความเร็ว: ช้าที่สุด
+
+
+เวลานี้สำคัญมาก เพราะใช้ทำนายผลของทุก Task ได้:
+
+[โค้ด / แผนภาพ : text]
+0.8 วินาที < 1.5 วินาที < 4.0 วินาที
+ข้าวมันไก่      ก๋วยเตี๋ยว       สเต็ก
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+4. สถาปัตยกรรม Client–Server
+----------------------------
+
+4.1 ฝั่ง Client
+---------------
+
+ไฟล์ foodcourt_01–foodcourt_05 ไม่ได้ทำอาหารเอง แต่เรียก:
+
+[โค้ด / แผนภาพ : python]
+send_order_to_kitchen(student_id, shop_name, menu_name)
+[จบโค้ด / แผนภาพ]
+
+ฟังก์ชันนี้อยู่ใน food_utils.py และเป็นผู้ส่ง HTTP request
+
+4.2 ฝั่ง Server
+---------------
+
+foodcourt_api.py รับ request ที่ endpoint:
+
+[โค้ด / แผนภาพ : text]
+POST /order/{shop_name}
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่าง:
+
+[โค้ด / แผนภาพ : text]
+POST /order/hainanese_chicken
+POST /order/noodle
+POST /order/steak
+[จบโค้ด / แผนภาพ]
+
+4.3 ข้อมูลที่ส่ง
+----------------
+
+Client ส่ง JSON body รูปแบบนี้:
+
+[โค้ด / แผนภาพ : json]
+{
+  "student_id": "6710301033",
+  "menu_name": "Sizzling Steak"
+}
+[จบโค้ด / แผนภาพ]
+
+4.4 ข้อมูลที่ได้รับกลับ
+-----------------------
+
+เมื่อทำอาหารเสร็จ Server ตอบ JSON ประมาณนี้:
+
+[โค้ด / แผนภาพ : json]
+{
+  "status": "READY_FOR_PICKUP",
+  "student_id": "6710301033",
+  "shop": "steak",
+  "menu": "Sizzling Steak",
+  "cooking_seconds": 4.0,
+  "timestamp": "Wed Jul 15 10:00:04 2026"
+}
+[จบโค้ด / แผนภาพ]
+
+Timestamp และเวลาจริงจะเปลี่ยนไปในแต่ละรอบค่ะ
+
+----------------------------------------------------------------
+
+Part A — Infrastructure Files
+=============================
+
+5. foodcourt_api.py — FastAPI Kitchen Server
+--------------------------------------------
+
+5.1 หน้าที่ของไฟล์
+------------------
+
+ไฟล์นี้สร้าง API server ที่จำลองครัวของศูนย์อาหาร
+
+[โค้ด / แผนภาพ : python]
+app = FastAPI(title="🍳 Smart Food Court API")
+[จบโค้ด / แผนภาพ]
+
+app คือ FastAPI application ที่ Uvicorn จะนำไปรันเป็น web server
+
+5.2 OrderModel
+--------------
+
+[โค้ด / แผนภาพ : python]
+class OrderModel(BaseModel):
+    student_id: str
+    menu_name: str
+[จบโค้ด / แผนภาพ]
+
+Pydantic BaseModel ใช้กำหนดรูปแบบ JSON ที่ server ยอมรับ
+
+- Field: student_id
+  Type: str
+  หน้าที่: รหัสผู้สั่ง
+
+- Field: menu_name
+  Type: str
+  หน้าที่: ชื่ออาหาร
+
+
+ถ้าส่ง JSON ขาด field หรือ type ไม่ถูก FastAPI จะตอบ validation error โดยอัตโนมัติ
+
+5.3 KITCHEN_LATENCY
+-------------------
+
+[โค้ด / แผนภาพ : python]
+KITCHEN_LATENCY = {
+    "hainanese_chicken": 0.8,
+    "noodle": 1.5,
+    "steak": 4.0
+}
+[จบโค้ด / แผนภาพ]
+
+Dictionary นี้เก็บเวลาทำอาหารของแต่ละร้าน โดยใช้ชื่อร้านเป็น key
+
+5.4 Endpoint cook_food()
+------------------------
+
+[โค้ด / แผนภาพ : python]
+@app.post("/order/{shop_name}")
+async def cook_food(shop_name: str, order: OrderModel):
+[จบโค้ด / แผนภาพ]
+
+ข้อมูลมาจาก 2 จุด:
+
+- Parameter: shop_name
+  มาจากไหน: URL path
+  ตัวอย่าง: steak จาก /order/steak
+
+- Parameter: order
+  มาจากไหน: JSON request body
+  ตัวอย่าง: student_id และ menu_name
+
+
+5.5 ตรวจชื่อร้าน
+----------------
+
+[โค้ด / แผนภาพ : python]
+if shop_name not in KITCHEN_LATENCY:
+    raise HTTPException(status_code=404, detail="Shop not found")
+[จบโค้ด / แผนภาพ]
+
+ถ้าเรียกชื่อร้านที่ไม่มี เช่น /order/pizza จะได้ HTTP 404
+
+5.6 จำลองการทำอาหาร
+-------------------
+
+[โค้ด / แผนภาพ : python]
+cooking_time = KITCHEN_LATENCY[shop_name]
+await asyncio.sleep(cooking_time)
+[จบโค้ด / แผนภาพ]
+
+ต้องใช้ await asyncio.sleep() เพราะ endpoint เป็น async ถ้าใช้ time.sleep() จะ block
+event loop และทำให้ request อื่นรอไปด้วย
+
+5.7 Response
+------------
+
+Server คืน Python dictionary และ FastAPI จะแปลงเป็น JSON ให้โดยอัตโนมัติ
+
+[โค้ด / แผนภาพ : python]
+return {
+    "status": "READY_FOR_PICKUP",
+    "student_id": order.student_id,
+    "shop": shop_name,
+    "menu": order.menu_name,
+    "cooking_seconds": cooking_time,
+    "timestamp": ctime()
+}
+[จบโค้ด / แผนภาพ]
+
+5.8 วิธีเปิด Server
+-------------------
+
+เปิด Terminal ที่โฟลเดอร์ Week4 แล้วรัน:
+
+[โค้ด / แผนภาพ : bash]
+uvicorn foodcourt_api:app --port 8088
+[จบโค้ด / แผนภาพ]
+
+ความหมาย:
+
+- ส่วน: foodcourt_api
+  ความหมาย: ชื่อไฟล์โดยไม่ใส่ .py
+
+- ส่วน: app
+  ความหมาย: ตัวแปร FastAPI ในไฟล์
+
+- ส่วน: --port 8088
+  ความหมาย: เปิด server ที่ port 8088
+
+
+API docs ของ FastAPI:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8088/docs
+[จบโค้ด / แผนภาพ]
+
+ต้องเปิด server ค้างไว้ใน Terminal หนึ่งหน้าต่าง แล้วจึงเปิดอีก Terminal เพื่อรัน client
+ค่ะ
+
+----------------------------------------------------------------
+
+6. food_utils.py — HTTP Client Helper
+-------------------------------------
+
+6.1 หน้าที่ของไฟล์
+------------------
+
+ไฟล์นี้รวม logic การส่งออเดอร์ไว้ใน function เดียว เพื่อไม่ให้ Task 1–5 ต้องเขียน HTTP
+code ซ้ำกัน
+
+[โค้ด / แผนภาพ : python]
+async def send_order_to_kitchen(
+    student_id: str,
+    shop_name: str,
+    menu_name: str
+) -> dict:
+[จบโค้ด / แผนภาพ]
+
+6.2 Parameter
+-------------
+
+- Parameter: student_id
+  ตัวอย่าง: "6710301033"
+  ความหมาย: รหัสนักศึกษา
+
+- Parameter: shop_name
+  ตัวอย่าง: "steak"
+  ความหมาย: ชื่อร้านที่ใช้ใน URL
+
+- Parameter: menu_name
+  ตัวอย่าง: "Sizzling Steak"
+  ความหมาย: ชื่อเมนูที่ส่งใน JSON
+
+
+6.3 สร้าง URL
+-------------
+
+โค้ดปัจจุบันใช้:
+
+[โค้ด / แผนภาพ : python]
+url = f"http://172.16.2.117:8088/order/{shop_name}"
+[จบโค้ด / แผนภาพ]
+
+ถ้า shop_name เป็น steak URL จะกลายเป็น:
+
+[โค้ด / แผนภาพ : text]
+http://172.16.2.117:8088/order/steak
+[จบโค้ด / แผนภาพ]
+
+6.4 สร้าง JSON payload
+----------------------
+
+[โค้ด / แผนภาพ : python]
+payload = {
+    "student_id": student_id,
+    "menu_name": menu_name
+}
+[จบโค้ด / แผนภาพ]
+
+shop_name ไม่ได้อยู่ใน JSON เพราะถูกใส่อยู่ใน URL path แล้ว
+
+6.5 ส่ง HTTP POST
+-----------------
+
+[โค้ด / แผนภาพ : python]
+async with httpx.AsyncClient() as client:
+    response = await client.post(url, json=payload, timeout=10.0)
+[จบโค้ด / แผนภาพ]
+
+- ส่วน: AsyncClient()
+  ความหมาย: HTTP client ที่ทำงานแบบ async
+
+- ส่วน: async with
+  ความหมาย: เปิด client และปิด connection ให้เมื่อจบ
+
+- ส่วน: await client.post(...)
+  ความหมาย: ส่ง request แล้วรอ response โดยไม่ block event loop
+
+- ส่วน: json=payload
+  ความหมาย: แปลง dictionary เป็น JSON body
+
+- ส่วน: timeout=10.0
+  ความหมาย: HTTP request รอได้สูงสุด 10 วินาที
+
+
+6.6 ตรวจ HTTP status
+--------------------
+
+ถ้า status เป็น 200:
+
+[โค้ด / แผนภาพ : python]
+return response.json()
+[จบโค้ด / แผนภาพ]
+
+ถ้าเป็น status อื่น:
+
+[โค้ด / แผนภาพ : python]
+return {
+    "status": "ERROR",
+    "detail": f"HTTP Error {response.status_code}"
+}
+[จบโค้ด / แผนภาพ]
+
+ถ้าเชื่อมต่อไม่ได้หรือเกิด exception:
+
+[โค้ด / แผนภาพ : python]
+return {
+    "status": "ERROR",
+    "detail": f"Connection failed: {e}"
+}
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญคือ function นี้ จับ exception แล้ว return dictionary แทนการโยน error ออกไป
+ดังนั้นบาง Task อาจยังทำงานต่อ แต่ผลลัพธ์จะไม่มี key shop หรือ menu
+
+----------------------------------------------------------------
+
+7. เรื่อง IP ที่ต้องเข้าใจก่อนรัน
+---------------------------------
+
+ในไฟล์ปัจจุบันมี URL สองแบบ:
+
+- ตำแหน่ง: Week4/Readme.md
+  URL: http://127.0.0.1:8088
+  ความหมาย: Server ในเครื่องตัวเอง
+
+- ตำแหน่ง: food_utils.py
+  URL: http://172.16.2.117:8088
+  ความหมาย: Server ในเครือข่ายห้องเรียน/เครื่องอื่น
+
+
+ดังนั้น แม้ใบเปิด foodcourt_api.py ในเครื่องตัวเอง แต่ Client ปัจจุบันก็ยังส่งไป
+172.16.2.117 ไม่ใช่ local server
+
+ถ้าเรียนในเครือข่ายที่เข้าถึง Server อาจารย์ได้
+-----------------------------------------------
+
+ใช้ URL 172.16.2.117 ตามโค้ดปัจจุบัน
+
+ถ้าทดลองด้วย Server ในเครื่องตัวเอง
+-----------------------------------
+
+ต้องตั้ง URL ใน food_utils.py เป็น:
+
+[โค้ด / แผนภาพ : python]
+url = f"http://127.0.0.1:8088/order/{shop_name}"
+[จบโค้ด / แผนภาพ]
+
+อย่าเปลี่ยน URL ก่อนส่งงานโดยไม่เช็ก requirement ของอาจารย์ เพราะ IP
+อาจเป็นส่วนหนึ่งของโจทย์ค่ะ
+
+----------------------------------------------------------------
+
+Part B — Task Files
+===================
+
+8. Task 1 — foodcourt_01_create_task.py
+---------------------------------------
+
+8.1 เป้าหมาย
+------------
+
+ฝึกสร้าง Task ด้วย asyncio.create_task() ตรวจสถานะทันที และรอผลภายหลัง
+
+8.2 Flow
+------------
+
+[โค้ด / แผนภาพ : text]
+สร้าง coroutine ส่งออเดอร์ข้าวมันไก่
+          |
+          v
+create_task() ส่งงานเข้า event loop
+          |
+          v
+เช็ก .done() ทันที -> ปกติเป็น False
+          |
+          v
+await food_task
+          |
+          v
+รับ response จากครัว
+[จบโค้ด / แผนภาพ]
+
+8.3 สร้าง Task
+--------------
+
+[โค้ด / แผนภาพ : python]
+food_task = asyncio.create_task(
+    send_order_to_kitchen(
+        MY_STUDENT_ID,
+        "hainanese_chicken",
+        "Chicken Rice Mixed"
+    )
+)
+[จบโค้ด / แผนภาพ]
+
+ก่อนใช้ create_task() สิ่งที่ได้จาก send_order_to_kitchen(...) เป็น coroutine
+ส่วนหลังสร้างแล้ว food_task เป็น Task object
+
+8.4 ตรวจ .done()
+----------------
+
+[โค้ด / แผนภาพ : python]
+food_task.done()
+[จบโค้ด / แผนภาพ]
+
+ค่าที่เป็นไปได้:
+
+- False — งานยังทำไม่เสร็จ
+- True — งานเสร็จ, error หรือถูก cancel แล้ว
+
+เมื่อเช็กทันทีหลังสร้าง Task โดยทั่วไปจะได้ False เพราะ HTTP request ยังไม่เสร็จ
+
+8.5 รอและรับผล
+--------------
+
+[โค้ด / แผนภาพ : python]
+result = await food_task
+[จบโค้ด / แผนภาพ]
+
+await ทำ 2 หน้าที่:
+
+1. รอ Task ให้เสร็จ
+2. รับค่าที่ coroutine return กลับมา
+
+8.6 Expected behavior
+---------------------
+
+ถ้า server เชื่อมต่อได้:
+
+[โค้ด / แผนภาพ : text]
+--- [Task 1] Practice using create_task to queue an order ---
+Checking task status immediately: Is it done? = False
+System Response: {'status': 'READY_FOR_PICKUP', ...}
+[จบโค้ด / แผนภาพ]
+
+Timestamp และรายละเอียด dictionary จะเปลี่ยนตาม request จริง
+
+8.7 Lab ย่อย
+------------
+
+1. ลอง print food_task.get_name()
+2. ลองตั้งชื่อ Task ด้วย name="Chicken-Order"
+3. เปลี่ยนร้านจากข้าวมันไก่เป็น steak แล้วสังเกตเวลารอ
+
+----------------------------------------------------------------
+
+9. Task 2 — foodcourt_02_gather.py
+----------------------------------
+
+9.1 เป้าหมาย
+------------
+
+ส่งออเดอร์ 3 ร้านพร้อมกัน และรอให้ ทุกออเดอร์ เสร็จด้วย asyncio.gather()
+
+9.2 ออเดอร์ที่ส่ง
+-----------------
+
+- ลำดับที่ส่งเข้า gather(): 1
+  ร้าน: hainanese_chicken
+  เวลา: 0.8 วินาที
+
+- ลำดับที่ส่งเข้า gather(): 2
+  ร้าน: noodle
+  เวลา: 1.5 วินาที
+
+- ลำดับที่ส่งเข้า gather(): 3
+  ร้าน: steak
+  เวลา: 4.0 วินาที
+
+
+9.3 ใช้ gather()
+----------------
+
+[โค้ด / แผนภาพ : python]
+results = await asyncio.gather(
+    send_order_to_kitchen(... "hainanese_chicken" ...),
+    send_order_to_kitchen(... "noodle" ...),
+    send_order_to_kitchen(... "steak" ...)
+)
+[จบโค้ด / แผนภาพ]
+
+gather() จะ:
+
+1. จัดให้ coroutine ทั้งสามคืบหน้าพร้อมกัน
+2. รอจนทุกงานเสร็จ
+3. คืน list ของผลลัพธ์
+
+9.4 ทำไมใช้เวลาประมาณ 4 วินาที ไม่ใช่ 6.3 วินาที
+------------------------------------------------
+
+ถ้าทำเรียงกัน:
+
+[โค้ด / แผนภาพ : text]
+0.8 + 1.5 + 4.0 = 6.3 วินาที
+[จบโค้ด / แผนภาพ]
+
+แต่เมื่อทำ concurrent:
+
+[โค้ด / แผนภาพ : text]
+เริ่มทั้งสามร้านใกล้กัน
+ข้าวมันไก่เสร็จที่ 0.8 วิ
+ก๋วยเตี๋ยวเสร็จที่ 1.5 วิ
+สเต็กเสร็จที่ 4.0 วิ
+gather จบเมื่อร้านสุดท้ายเสร็จ
+[จบโค้ด / แผนภาพ]
+
+จึงใช้เวลาประมาณร้านที่ช้าที่สุด คือ 4.0 วินาที บวก network overhead เล็กน้อย
+
+9.5 ลำดับของ results
+--------------------
+
+จุดที่มักออกสอบ:
+
+gather() คืนผลลัพธ์ตาม ลำดับ argument ที่ส่งเข้าไป ไม่ใช่ลำดับเวลาที่งานเสร็จ
+
+ดังนั้น results จะเรียง:
+
+1. hainanese chicken
+2. noodle
+3. steak
+
+แม้ข้าวมันไก่จะเสร็จก่อนและสเต็กเสร็จทีหลัง
+
+9.6 Expected behavior
+---------------------
+
+[โค้ด / แผนภาพ : text]
+[Pickup] Shop: hainanese_chicken | Menu: Chicken Rice is ready!
+[Pickup] Shop: noodle | Menu: Wonton Noodles is ready!
+[Pickup] Shop: steak | Menu: Sizzling Steak is ready!
+Total time: ประมาณ 4.xx seconds (Equals to the slowest dish).
+[จบโค้ด / แผนภาพ]
+
+9.7 Lab ย่อย
+------------
+
+1. สลับลำดับ argument ใน gather() แล้วดู order ของ results
+2. เอา steak ออก แล้วทำนายเวลารวม
+3. เพิ่มร้านข้าวมันไก่อีกหนึ่งออเดอร์ แล้วดูว่าเวลารวมเปลี่ยนมากหรือไม่
+
+----------------------------------------------------------------
+
+10. Task 3 — foodcourt_03_wait_first.py
+---------------------------------------
+
+10.1 เป้าหมาย
+-------------
+
+ส่ง 3 ออเดอร์พร้อมกัน แต่ต้องการแค่ จานแรกที่เสร็จ
+
+10.2 ทำไมต้องสร้าง Task ก่อน
+----------------------------
+
+asyncio.wait() ในโค้ดนี้รับ Task objects:
+
+[โค้ด / แผนภาพ : python]
+task1 = asyncio.create_task(...)
+task2 = asyncio.create_task(...)
+task3 = asyncio.create_task(...)
+[จบโค้ด / แผนภาพ]
+
+Task object ทำให้ตรวจสถานะ อ่าน result และเรียก .cancel() ได้
+
+10.3 รอแบบ FIRST_COMPLETED
+--------------------------
+
+[โค้ด / แผนภาพ : python]
+done, pending = await asyncio.wait(
+    [task1, task2, task3],
+    return_when=asyncio.FIRST_COMPLETED
+)
+[จบโค้ด / แผนภาพ]
+
+ผลลัพธ์ถูกแบ่งเป็น 2 set:
+
+- ตัวแปร: done
+  เก็บอะไร: Task ที่เสร็จแล้ว
+
+- ตัวแปร: pending
+  เก็บอะไร: Task ที่ยังไม่เสร็จ
+
+
+FIRST_COMPLETED หมายถึงหยุดรอเมื่อมี Task แรกเสร็จ ไม่ได้รอทั้งหมด
+
+10.4 ใครควรเป็นผู้ชนะ
+---------------------
+
+จาก latency:
+
+[โค้ด / แผนภาพ : text]
+hainanese_chicken = 0.8 วินาที
+noodle             = 1.5 วินาที
+steak              = 4.0 วินาที
+[จบโค้ด / แผนภาพ]
+
+ดังนั้นข้าวมันไก่ควรชนะเมื่อ server ทำงานปกติ
+
+10.5 อ่านผลจากผู้ชนะ
+--------------------
+
+[โค้ด / แผนภาพ : python]
+winner_task = done.pop()
+result = winner_task.result()
+[จบโค้ด / แผนภาพ]
+
+- .pop() ดึง Task หนึ่งตัวออกจาก set
+- .result() อ่านค่าที่ Task return
+- ใช้ .result() ได้อย่างปลอดภัยเมื่อ Task อยู่ใน done และไม่ได้พัง/cancel
+
+10.6 ยกเลิกงานที่เหลือ
+----------------------
+
+[โค้ด / แผนภาพ : python]
+for task in pending:
+    task.cancel()
+[จบโค้ด / แผนภาพ]
+
+หลังข้าวมันไก่เสร็จ ก๋วยเตี๋ยวและสเต็กไม่จำเป็นแล้ว จึงส่งสัญญาณยกเลิก
+
+แนวปฏิบัติที่สมบูรณ์ในระบบทั่วไปคือ หลัง cancel() ควรรอเก็บ Task ที่ถูกยกเลิกด้วย:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.gather(*pending, return_exceptions=True)
+[จบโค้ด / แผนภาพ]
+
+โค้ดปัจจุบันยังไม่มีบรรทัดนี้ แต่ตัวอย่างนี้ช่วยให้เข้าใจว่าการ cancel เป็นคำสั่งร้องขอ
+และควรเปิดโอกาสให้ Task จบขั้นตอนยกเลิกอย่างเรียบร้อย
+
+10.7 Expected behavior
+----------------------
+
+[โค้ด / แผนภาพ : text]
+Winner served dish: Shop: hainanese_chicken | Menu: Chicken Rice Thigh
+Cleaning up: Canceling 2 remaining pending orders...
+Total waiting time for the first dish: ประมาณ 0.8x seconds.
+[จบโค้ด / แผนภาพ]
+
+10.8 wait() ไม่ได้ยกเลิก pending ให้อัตโนมัติ
+---------------------------------------------
+
+นี่เป็นจุดสำคัญ:
+
+- asyncio.wait(... FIRST_COMPLETED) แค่หยุดรอ
+- งานที่อยู่ใน pending ยังคงทำงานต่อ
+- ถ้าไม่ต้องการแล้ว โปรแกรมต้อง .cancel() เอง
+
+10.9 Lab ย่อย
+-------------
+
+1. เปลี่ยน latency ให้ noodle เร็วที่สุด แล้วทำนาย winner
+2. เอา loop cancel() ออก แล้วสังเกตว่าโปรแกรมรอหรือจบต่างกันอย่างไร
+3. เพิ่ม gather(*pending, return_exceptions=True) หลัง cancel
+
+----------------------------------------------------------------
+
+11. Task 4 — foodcourt_04_wait_for.py
+-------------------------------------
+
+11.1 เป้าหมาย
+-------------
+
+สั่งสเต็กที่ใช้ 4.0 วินาที แต่กำหนด SLA ว่าจะรอไม่เกิน 2.0 วินาที
+
+11.2 ใช้ asyncio.wait_for()
+---------------------------
+
+[โค้ด / แผนภาพ : python]
+result = await asyncio.wait_for(
+    send_order_to_kitchen(
+        STUDENT_ID,
+        "steak",
+        "Sizzling Steak"
+    ),
+    timeout=2.0
+)
+[จบโค้ด / แผนภาพ]
+
+wait_for() รับ:
+
+1. awaitable ที่ต้องการรอ
+2. เวลาสูงสุดผ่าน timeout
+
+11.3 ทำนายผล
+------------
+
+[โค้ด / แผนภาพ : text]
+สเต็กต้องใช้ 4.0 วินาที
+แต่โปรแกรมรอได้ 2.0 วินาที
+4.0 > 2.0
+ดังนั้นเกิด TimeoutError
+[จบโค้ด / แผนภาพ]
+
+11.4 จัดการ Timeout
+-------------------
+
+[โค้ด / แผนภาพ : python]
+except asyncio.TimeoutError:
+    print("Timeout occurred: Steak took too long! ...")
+[จบโค้ด / แผนภาพ]
+
+การมี try/except ทำให้โปรแกรมไม่ crash แต่เปลี่ยนไปทำ fallback behavior แทน
+
+11.5 บรรทัดที่ปกติไม่ทำงาน
+--------------------------
+
+[โค้ด / แผนภาพ : python]
+print(f"{ctime()} | Order received: {result}")
+[จบโค้ด / แผนภาพ]
+
+ในค่าปัจจุบัน บรรทัดนี้ไม่ควรถูกเรียก เพราะ timeout เกิดก่อน server ตอบ
+
+ถ้าเปลี่ยน timeout เป็น 5.0 สเต็กมีเวลาพอทำเสร็จ และบรรทัดนี้จะทำงาน
+
+11.6 wait_for() กับ HTTP timeout คนละชั้น
+-----------------------------------------
+
+ในระบบนี้มี timeout สองชั้น:
+
+- ชั้น: Application timeout
+  อยู่ที่: asyncio.wait_for()
+  ค่า: 2.0 วินาที
+  หน้าที่: กฎของ Task 4 ว่าจะรออาหารนานเท่าไร
+
+- ชั้น: HTTP client timeout
+  อยู่ที่: client.post(... timeout=10.0)
+  ค่า: 10.0 วินาที
+  หน้าที่: จำกัดเวลารวมของ HTTP request
+
+
+Application timeout 2 วินาทีสั้นกว่า จึงเกิดก่อน HTTP timeout 10 วินาที
+
+11.7 Expected behavior
+----------------------
+
+[โค้ด / แผนภาพ : text]
+[System] Order sent. Monitoring 2.0s timeout limit...
+Timeout occurred: Steak took too long! Leaving the food court now.
+[จบโค้ด / แผนภาพ]
+
+เวลารวมควรใกล้ 2 วินาทีเมื่อเชื่อมต่อ server สำเร็จและ server จำลองสเต็ก 4 วินาที
+
+11.8 Lab ย่อย
+-------------
+
+- ค่า timeout: 1.0
+  ผลที่คาด: timeout
+
+- ค่า timeout: 2.0
+  ผลที่คาด: timeout
+
+- ค่า timeout: 3.0
+  ผลที่คาด: timeout
+
+- ค่า timeout: 5.0
+  ผลที่คาด: ได้ response สำเร็จ
+
+
+ลองเปลี่ยนร้านเป็น noodle โดยคง timeout 2.0 วินาที ก๋วยเตี๋ยวควรเสร็จทันเพราะใช้ 1.5
+วินาที
+
+----------------------------------------------------------------
+
+12. Task 5 — foodcourt_05_mix_concepts.py
+-----------------------------------------
+
+12.1 เป้าหมาย
+-------------
+
+รวมสามแนวคิดในงานเดียว:
+
+- asyncio.create_task()
+- asyncio.wait_for()
+- asyncio.gather()
+
+12.2 Task ของก๋วยเตี๋ยว
+-----------------------
+
+[โค้ด / แผนภาพ : python]
+noodle_task = asyncio.create_task(
+    send_order_to_kitchen(
+        STUDENT_ID,
+        "noodle",
+        "Wonton Noodles"
+    )
+)
+[จบโค้ด / แผนภาพ]
+
+ก๋วยเตี๋ยวใช้ 1.5 วินาทีและไม่มี application timeout เพิ่ม
+
+12.3 Task ของข้าวมันไก่
+-----------------------
+
+[โค้ด / แผนภาพ : python]
+chicken_task = asyncio.create_task(
+    asyncio.wait_for(
+        send_order_to_kitchen(
+            STUDENT_ID,
+            "hainanese_chicken",
+            "Chicken Rice"
+        ),
+        timeout=1.0
+    )
+)
+[จบโค้ด / แผนภาพ]
+
+Task นี้มี wait_for() ครอบอยู่:
+
+[โค้ด / แผนภาพ : text]
+ข้าวมันไก่ใช้ 0.8 วินาที
+timeout ให้ 1.0 วินาที
+0.8 < 1.0
+จึงควรเสร็จทัน
+[จบโค้ด / แผนภาพ]
+
+12.4 รวมด้วย gather()
+---------------------
+
+[โค้ด / แผนภาพ : python]
+results = await asyncio.gather(noodle_task, chicken_task)
+[จบโค้ด / แผนภาพ]
+
+แม้ข้าวมันไก่เสร็จที่ประมาณ 0.8 วินาที แต่ gather() ต้องรอก๋วยเตี๋ยวด้วย จึงจบที่ประมาณ
+1.5 วินาที
+
+12.5 Success path
+-----------------
+
+ถ้าทั้งสองจานเสร็จตาม latency:
+
+[โค้ด / แผนภาพ : text]
+Success: All food served on time! Received 2 dishes.
+Total elapsed time: ประมาณ 1.5x seconds.
+[จบโค้ด / แผนภาพ]
+
+12.6 Failure path
+-----------------
+
+ถ้าข้าวมันไก่ใช้เกิน 1.0 วินาที wait_for() จะโยน TimeoutError และเข้า:
+
+[โค้ด / แผนภาพ : python]
+except asyncio.TimeoutError:
+    print("Failed: One of the dishes took too long!")
+[จบโค้ด / แผนภาพ]
+
+ข้อควรรู้ระดับสอบ:
+
+- เมื่อ coroutine หนึ่งใน gather() เกิด exception, gather() จะส่ง exception นั้นออกมาให้
+  try/except
+- gather() ไม่ได้แปลว่าจะยกเลิก Task อื่นทั้งหมดให้เสมอไป
+- ถ้าต้องการ cleanup ที่ควบคุมได้ ควรเก็บ Task references, cancel งานที่เหลือ และ await
+  งานเหล่านั้นอย่างชัดเจน
+
+12.7 จุดสังเกตเรื่องรหัสนักศึกษา
+--------------------------------
+
+Task 1–4 ใช้:
+
+[โค้ด / แผนภาพ : text]
+6710301033
+[จบโค้ด / แผนภาพ]
+
+แต่ Task 5 ปัจจุบันใช้:
+
+[โค้ด / แผนภาพ : text]
+6710301017
+[จบโค้ด / แผนภาพ]
+
+คู่มือนี้บันทึกตามโค้ดจริง ใบควรตรวจ requirement หรือรหัสของตนเองก่อนส่งงาน
+แต่ไม่ควรเปลี่ยนโดยเดาเองค่ะ
+
+12.8 Lab ย่อย
+-------------
+
+1. เปลี่ยน timeout ของข้าวมันไก่เป็น 0.5 แล้วทำนายผล
+2. เปลี่ยนจากข้าวมันไก่เป็น steak แต่คง timeout 1.0
+3. ใช้ return_exceptions=True กับ gather() แล้วสังเกตว่า results เปลี่ยนอย่างไร
+4. เพิ่ม Task สเต็กตัวที่สาม แล้วทำนายเวลารวม
+
+----------------------------------------------------------------
+
+13. ตารางเปรียบเทียบคำสั่งหลัก
+------------------------------
+
+- คำสั่ง: create_task(coro)
+  รออะไร: ไม่ได้รอทันที
+  คืนอะไร: Task
+  หยุดรอเมื่อ: ไม่เกี่ยว
+  ยกเลิกงานอื่นอัตโนมัติไหม: ไม่
+  ใช้ในไฟล์: Task 1, 3, 5
+
+- คำสั่ง: await task
+  รออะไร: Task เดียว
+  คืนอะไร: ค่าที่ Task return
+  หยุดรอเมื่อ: Task นั้นจบ
+  ยกเลิกงานอื่นอัตโนมัติไหม: ไม่
+  ใช้ในไฟล์: Task 1
+
+- คำสั่ง: gather(*aws)
+  รออะไร: ทุกงาน
+  คืนอะไร: list ผลลัพธ์ตามลำดับ input
+  หยุดรอเมื่อ: ทุกงานจบ หรือมี exception ตาม behavior
+  ยกเลิกงานอื่นอัตโนมัติไหม: ไม่ควรสมมติว่ายกเลิกทุกงาน
+  ใช้ในไฟล์: Task 2, 5
+
+- คำสั่ง: wait(tasks, FIRST_COMPLETED)
+  รออะไร: Task ชุดหนึ่ง
+  คืนอะไร: (done, pending)
+  หยุดรอเมื่อ: มีตัวแรกเสร็จ
+  ยกเลิกงานอื่นอัตโนมัติไหม: ไม่
+  ใช้ในไฟล์: Task 3
+
+- คำสั่ง: wait_for(aw, timeout)
+  รออะไร: awaitable เดียว
+  คืนอะไร: ผลของ awaitable
+  หยุดรอเมื่อ: งานเสร็จหรือหมดเวลา
+  ยกเลิกงานอื่นอัตโนมัติไหม: ยกเลิก awaitable เมื่อ timeout ตามกลไก asyncio
+  ใช้ในไฟล์: Task 4, 5
+
+- คำสั่ง: task.cancel()
+  รออะไร: ไม่ได้รอ
+  คืนอะไร: True/False ว่าส่งคำขอยกเลิกได้ไหม
+  หยุดรอเมื่อ: —
+  ยกเลิกงานอื่นอัตโนมัติไหม: ยกเลิกเฉพาะ Task นั้น
+  ใช้ในไฟล์: Task 3
+
+
+วิธีเลือกใช้แบบจำง่าย
+---------------------
+
+[โค้ด / แผนภาพ : text]
+อยากให้งานเริ่มก่อน แล้วค่อยกลับมารอ       -> create_task
+อยากได้ผลครบทุกงาน                         -> gather
+อยากได้จานแรก แล้วแยก done/pending          -> wait + FIRST_COMPLETED
+อยากจำกัดเวลาของงานหนึ่ง                    -> wait_for
+ไม่ต้องการงานที่เหลือแล้ว                    -> cancel + await cleanup
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+14. ตารางทำนายเวลาของ Task 1–5
+------------------------------
+
+ตารางนี้สมมติว่า server/network ทำงานปกติและไม่มี overhead มากผิดปกติ
+
+- Task: Task 1
+  งานที่รอ: ข้าวมันไก่
+  เวลาประมาณ: 0.8+ วิ
+  เหตุผล: รอ Task เดียว
+
+- Task: Task 2
+  งานที่รอ: ข้าวมันไก่ + ก๋วยเตี๋ยว + สเต็ก
+  เวลาประมาณ: 4.0+ วิ
+  เหตุผล: gather() รอร้านช้าที่สุด
+
+- Task: Task 3
+  งานที่รอ: จานแรกจาก 3 ร้าน
+  เวลาประมาณ: 0.8+ วิ
+  เหตุผล: FIRST_COMPLETED ได้ข้าวมันไก่
+
+- Task: Task 4
+  งานที่รอ: สเต็ก แต่ timeout 2.0
+  เวลาประมาณ: ~2.0 วิ
+  เหตุผล: timeout ก่อนสเต็กเสร็จ
+
+- Task: Task 5
+  งานที่รอ: ก๋วยเตี๋ยว + ข้าวมันไก่
+  เวลาประมาณ: 1.5+ วิ
+  เหตุผล: ทั้งคู่สำเร็จและ gather() รอก๋วยเตี๋ยว
+
+
+เครื่องหมาย + หมายถึงอาจมี network และ runtime overhead เพิ่มเล็กน้อย
+
+----------------------------------------------------------------
+
+15. วิธีรันทั้งชุด
+------------------
+
+15.1 ติดตั้ง Library
+--------------------
+
+ถ้ายังไม่มี package:
+
+[โค้ด / แผนภาพ : bash]
+python -m pip install fastapi uvicorn httpx
+[จบโค้ด / แผนภาพ]
+
+15.2 เปิด Local API Server
+--------------------------
+
+Terminal 1:
+
+[โค้ด / แผนภาพ : bash]
+cd Week4
+python -m uvicorn foodcourt_api:app --port 8088
+[จบโค้ด / แผนภาพ]
+
+เปิดตรวจ API docs:
+
+[โค้ด / แผนภาพ : text]
+http://127.0.0.1:8088/docs
+[จบโค้ด / แผนภาพ]
+
+Local server จะถูกใช้จริงก็ต่อเมื่อ URL ใน food_utils.py ชี้มาที่ 127.0.0.1:8088 ค่ะ
+
+15.3 รัน Client
+---------------
+
+จาก root project ใน Terminal 2:
+
+[โค้ด / แผนภาพ : bash]
+python Week4/foodcourt_01_create_task.py
+python Week4/foodcourt_02_gather.py
+python Week4/foodcourt_03_wait_first.py
+python Week4/foodcourt_04_wait_for.py
+python Week4/foodcourt_05_mix_concepts.py
+[จบโค้ด / แผนภาพ]
+
+15.4 ตรวจ Syntax
+----------------
+
+[โค้ด / แผนภาพ : bash]
+python -m py_compile Week4/*.py
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+16. Debug Checklist
+-------------------
+
+- อาการ: ModuleNotFoundError: httpx
+  สาเหตุที่เป็นไปได้: ยังไม่ได้ติดตั้ง HTTPX
+  วิธีตรวจ: python -m pip install httpx
+
+- อาการ: ModuleNotFoundError: fastapi
+  สาเหตุที่เป็นไปได้: ยังไม่ได้ติดตั้ง FastAPI
+  วิธีตรวจ: python -m pip install fastapi uvicorn
+
+- อาการ: Connection failed
+  สาเหตุที่เป็นไปได้: Server ไม่เปิด, IP/port ผิด หรืออยู่คนละ network
+  วิธีตรวจ: ตรวจ URL และเปิด server
+
+- อาการ: เปิด local server แล้ว client ยังต่อไม่ได้
+  สาเหตุที่เป็นไปได้: Client ยังชี้ไป 172.16.2.117
+  วิธีตรวจ: ตรวจบรรทัด URL ใน food_utils.py
+
+- อาการ: HTTP 404
+  สาเหตุที่เป็นไปได้: shop_name ไม่มีใน KITCHEN_LATENCY
+  วิธีตรวจ: ใช้ชื่อร้านให้ตรงทุกตัวอักษร
+
+- อาการ: ค่า result.get('shop') เป็น None
+  สาเหตุที่เป็นไปได้: Helper คืน error dictionary ที่ไม่มี key shop
+  วิธีตรวจ: print result เต็ม ๆ และดู detail
+
+- อาการ: Task 4 ไม่ timeout
+  สาเหตุที่เป็นไปได้: Server ตอบ error เร็ว หรือ latency ไม่ใช่ 4 วินาที
+  วิธีตรวจ: ตรวจ response และ server ที่ Client เรียกจริง
+
+- อาการ: Task 3 winner ไม่ใช่ข้าวมันไก่
+  สาเหตุที่เป็นไปได้: Server/network latency เปลี่ยน หรือ request บางตัว error เร็ว
+  วิธีตรวจ: ตรวจ result และ server log
+
+- อาการ: TimeoutError
+  สาเหตุที่เป็นไปได้: งานเกินเวลาที่ wait_for() กำหนด
+  วิธีตรวจ: เพิ่ม timeout หรือเลือกงานที่เร็วขึ้น
+
+- อาการ: Server เปิดไม่ได้เพราะ port ถูกใช้
+  สาเหตุที่เป็นไปได้: มี process อื่นใช้ port 8088
+  วิธีตรวจ: ปิด server เก่าหรือใช้ portใหม่ให้ตรงทั้งสองฝั่ง
+
+
+ระวัง Error Response ที่เสร็จเร็ว
+---------------------------------
+
+send_order_to_kitchen() จับ exception แล้ว return dictionary ทันที เช่น:
+
+[โค้ด / แผนภาพ : python]
+{
+    "status": "ERROR",
+    "detail": "Connection failed: ..."
+}
+[จบโค้ด / แผนภาพ]
+
+ผลคือ Task อาจถูกนับว่า “เสร็จแล้ว” อย่างรวดเร็ว แม้ไม่ได้อาหารจริง
+
+ดังนั้นในระบบจริงไม่ควรดูแค่ว่า Task เสร็จก่อน แต่ต้องตรวจด้วยว่า:
+
+[โค้ด / แผนภาพ : python]
+result.get("status") == "READY_FOR_PICKUP"
+[จบโค้ด / แผนภาพ]
+
+โค้ดปัจจุบันเป็นตัวอย่างเพื่อเรียน concurrency จึงยังไม่ได้เพิ่ม validation
+นี้ทุกไฟล์ค่ะ
+
+----------------------------------------------------------------
+
+17. คำถามแนวสอบพร้อมคำตอบสั้น
+-----------------------------
+
+17.1 async def คืออะไร
+----------------------
+
+ประกาศ coroutine function ที่สามารถใช้ await และทำงานร่วมกับ event loop ได้
+
+17.2 await ทำอะไร
+-----------------
+
+รอผลของ awaitable โดยเปิดโอกาสให้ event loop ไปทำ Task อื่นระหว่างที่งานนี้กำลังรอ
+
+17.3 create_task() ต่างจากเรียก coroutine ตรง ๆ อย่างไร
+-------------------------------------------------------
+
+การเรียก async function ได้ coroutine object ส่วน create_task() ส่ง coroutine เข้า event
+loop ให้เริ่มมีโอกาสทำงาน
+
+17.4 ทำไม Task 2 ใช้ gather()
+-----------------------------
+
+เพราะต้องการรอและรับผลลัพธ์ของออเดอร์ครบทุกจาน
+
+17.5 ทำไม Task 2 ใช้เวลาประมาณ 4 วินาที
+---------------------------------------
+
+สามงานทำ concurrent และ gather() รอร้านช้าที่สุด คือ steak 4.0 วินาที
+
+17.6 ทำไม Task 3 ใช้ wait() แทน gather()
+----------------------------------------
+
+เพราะต้องการหยุดรอเมื่อมีจานแรกเสร็จ และต้องการแยก done กับ pending
+
+17.7 FIRST_COMPLETED ยกเลิกงานที่เหลือหรือไม่
+---------------------------------------------
+
+ไม่ยกเลิก ต้องวน .cancel() pending tasks เอง
+
+17.8 ทำไมต้อง cleanup pending Task
+----------------------------------
+
+เพราะงานที่ไม่ใช้แล้วอาจยังใช้ connection, เวลา และ resource ต่อ
+
+17.9 wait_for() ใช้ทำอะไร
+-------------------------
+
+กำหนดเวลารอสูงสุดให้ awaitable ถ้าเกินจะเกิด timeout
+
+17.10 ทำไม Task 4 timeout
+-------------------------
+
+สเต็กใช้ 4.0 วินาที แต่ wait_for() อนุญาตเพียง 2.0 วินาที
+
+17.11 time.sleep() กับ asyncio.sleep() ต่างกันอย่างไร
+-----------------------------------------------------
+
+- time.sleep() block thread
+- await asyncio.sleep() คืน control ให้ event loop ไปทำงานอื่น
+
+17.12 HTTP 404 หมายถึงอะไรในระบบนี้
+-----------------------------------
+
+เรียก endpoint หรือชื่อร้านที่ server ไม่พบ เช่น /order/pizza
+
+17.13 ทำไมต้องใช้ async with httpx.AsyncClient()
+------------------------------------------------
+
+เพื่อเปิดและปิด HTTP client/connection อย่างถูกต้อง พร้อมรองรับ request แบบ async
+
+17.14 gather() คืนผลตามลำดับใด
+------------------------------
+
+คืนตามลำดับ awaitables ที่ส่งเข้าไป ไม่ใช่ลำดับที่เสร็จ
+
+17.15 done() เป็น True แปลว่าสำเร็จเสมอไหม
+------------------------------------------
+
+ไม่เสมอ Task อาจสำเร็จ, พังด้วย exception หรือถูก cancel ก็ถือว่า done ได้
+
+----------------------------------------------------------------
+
+18. แบบฝึกหัดรวม
+----------------
+
+Exercise 1 — ทำนายผลโดยไม่รัน
+-----------------------------
+
+ถ้าแก้ latency เป็น:
+
+[โค้ด / แผนภาพ : python]
+KITCHEN_LATENCY = {
+    "hainanese_chicken": 2.0,
+    "noodle": 0.5,
+    "steak": 1.0
+}
+[จบโค้ด / แผนภาพ]
+
+ตอบว่า:
+
+1. Task 2 ใช้เวลาประมาณเท่าไร
+2. Task 3 ร้านใดชนะ
+3. Task 4 ยัง timeout หรือไม่
+
+เฉลยแนวคิด:
+
+1. ประมาณ 2.0 วินาที เพราะ gather() รอร้านช้าที่สุด
+2. noodle ชนะ เพราะใช้ 0.5 วินาที
+3. steak ใช้ 1.0 วินาทีและ timeout 2.0 จึงควรสำเร็จ
+
+Exercise 2 — เปรียบเทียบ gather กับ wait
+----------------------------------------
+
+อธิบายด้วยคำของตัวเอง:
+
+[โค้ด / แผนภาพ : text]
+gather = ______________________________________
+wait + FIRST_COMPLETED = ______________________
+[จบโค้ด / แผนภาพ]
+
+คำตอบย่อ:
+
+[โค้ด / แผนภาพ : text]
+gather = รอทุกงานและรับผลทั้งหมด
+wait + FIRST_COMPLETED = หยุดรอเมื่อมีงานแรกเสร็จ และแยกงานที่เหลือเป็น pending
+[จบโค้ด / แผนภาพ]
+
+Exercise 3 — ออกแบบ SLA
+-----------------------
+
+กำหนดว่า:
+
+- ข้าวมันไก่ต้องไม่เกิน 1.0 วินาที
+- ก๋วยเตี๋ยวต้องไม่เกิน 2.0 วินาที
+- สเต็กต้องไม่เกิน 3.0 วินาที
+
+จาก latency ปัจจุบัน:
+
+- ร้าน: ข้าวมันไก่
+  Latency: 0.8
+  SLA: 1.0
+  ผล: ผ่าน
+
+- ร้าน: ก๋วยเตี๋ยว
+  Latency: 1.5
+  SLA: 2.0
+  ผล: ผ่าน
+
+- ร้าน: สเต็ก
+  Latency: 4.0
+  SLA: 3.0
+  ผล: timeout
+
+
+----------------------------------------------------------------
+
+19. สิ่งที่ควรพูดได้ก่อนเข้าสอบ
+-------------------------------
+
+ลองอธิบายโดยไม่เปิดคู่มือ:
+
+- [ ] Client และ Server ต่างกันอย่างไร
+- [ ] food_utils.py มีหน้าที่อะไร
+- [ ] FastAPI รับ shop_name และ JSON body จากไหน
+- [ ] ทำไม endpoint ต้องใช้ await asyncio.sleep()
+- [ ] create_task() ทำอะไร
+- [ ] .done() บอกอะไรและไม่บอกอะไร
+- [ ] gather() เหมาะกับโจทย์แบบไหน
+- [ ] wait(... FIRST_COMPLETED) เหมาะกับโจทย์แบบไหน
+- [ ] done และ pending ต่างกันอย่างไร
+- [ ] ทำไม pending tasks ต้องถูก cleanup
+- [ ] wait_for() ทำให้เกิด timeout อย่างไร
+- [ ] ทำไม Task 2 ใช้ประมาณ 4 วินาที
+- [ ] ทำไม Task 3 ได้ข้าวมันไก่เป็นผู้ชนะ
+- [ ] ทำไม Task 4 timeout ที่ประมาณ 2 วินาที
+- [ ] ทำไม Task 5 ปกติใช้ประมาณ 1.5 วินาที
+- [ ] URL 127.0.0.1 ต่างจาก 172.16.2.117 อย่างไร
+
+----------------------------------------------------------------
+
+20. Cheat Sheet ก่อนสอบ
+-----------------------
+
+[โค้ด / แผนภาพ : text]
+async def
+    สร้าง coroutine function
+
+await
+    รอ awaitable และคืน control ให้ event loop ระหว่างรอ
+
+asyncio.run(main())
+    เปิด event loop แล้วรัน main coroutine
+
+asyncio.create_task(coro)
+    ส่ง coroutine เข้า event loop และได้ Task object
+
+task.done()
+    เช็กว่า Task จบแล้วหรือยัง แต่ไม่ได้ยืนยันว่าสำเร็จ
+
+await task
+    รอ Task และรับค่าที่ return
+
+asyncio.gather(a, b, c)
+    รอทุกงาน คืนผลตามลำดับ input
+
+asyncio.wait(tasks, return_when=FIRST_COMPLETED)
+    รอจนมีตัวแรกเสร็จ คืน done และ pending
+
+task.cancel()
+    ส่งคำขอยกเลิก Task
+
+asyncio.wait_for(aw, timeout=n)
+    รอไม่เกิน n วินาที ถ้าเกินเกิด timeout
+
+httpx.AsyncClient
+    ส่ง HTTP request แบบ async
+
+FastAPI
+    สร้าง HTTP API server
+
+POST /order/{shop_name}
+    ส่งออเดอร์ไปยังร้านที่ระบุ
+[จบโค้ด / แผนภาพ]
+
+จำสถานการณ์ 4 แบบนี้ให้ได้:
+
+[โค้ด / แผนภาพ : text]
+ต้องการผลครบทุกจาน       -> gather
+ต้องการจานแรก             -> wait + FIRST_COMPLETED
+ต้องการกำหนดเวลาสูงสุด    -> wait_for
+ต้องการเริ่มงานไว้ก่อน     -> create_task
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+21. สรุปสุดท้าย
+---------------
+
+Week 4 ไม่ได้สอนแค่เขียน async function แต่สอนให้เอา asyncio ไปใช้กับงาน I/O จริงผ่าน
+HTTP
+
+หัวใจของแต่ละไฟล์:
+
+- ไฟล์: foodcourt_api.py
+  จำสั้น ๆ: Server รับออเดอร์และจำลองเวลาทำอาหาร
+
+- ไฟล์: food_utils.py
+  จำสั้น ๆ: Client helper ส่ง HTTP POST และคืน JSON
+
+- ไฟล์: foodcourt_01_create_task.py
+  จำสั้น ๆ: สร้าง Task ตรวจสถานะ แล้ว await ผล
+
+- ไฟล์: foodcourt_02_gather.py
+  จำสั้น ๆ: รอทุกจาน เวลาขึ้นกับจานช้าที่สุด
+
+- ไฟล์: foodcourt_03_wait_first.py
+  จำสั้น ๆ: เอาจานแรก แล้ว cancel จานที่เหลือ
+
+- ไฟล์: foodcourt_04_wait_for.py
+  จำสั้น ๆ: จำกัดเวลารอสเต็กและรับมือ timeout
+
+- ไฟล์: foodcourt_05_mix_concepts.py
+  จำสั้น ๆ: ผสม Task, timeout และ gather
+
+
+ถ้าใบจำได้ว่า “จะรอทุกงาน, รอจานแรก หรือรอแบบมีเส้นตาย” ใบจะเลือกใช้ gather(), wait()
+และ wait_for() ได้ถูกต้องค่ะ

@@ -1,0 +1,1341 @@
+บท 2 — Coroutine, Awaitable และ Event Loop
+========================================================================
+
+[CORO-01] แยก function / object / task
+async def fetch(): ... นิยาม coroutine function
+fetch() สร้าง coroutine object; ยังไม่ schedule โดยการเรียกเพียงอย่างเดียว
+await fetch() รันและรอ coroutine จากภายใน coroutine อื่น
+asyncio.create_task(fetch()) สร้าง Task และ schedule ให้ loop
+asyncio.run(main()) เป็นจุดเริ่มโปรแกรมสคริปต์และจัดการ loop ให้
+ใน environment ที่มี loop รันอยู่แล้ว เช่นบาง notebook ใช้ await main()
+
+Awaitable คือสิ่งที่ await ได้ เช่น coroutine, Task, Future
+Future แทนผลลัพธ์ที่ยังไม่พร้อม พบใน API ระดับล่าง ไม่จำเป็นต้องสร้างเองบ่อย
+
+[LOOP-01] Event loop ทำอะไร?
+1. เลือก task/callback ที่พร้อม
+2. รันต่อจนงานจบหรือพักรอสิ่งที่ยังไม่พร้อม
+3. เฝ้ารอ timer/I/O แล้วนำงานกลับเข้าสู่คิวพร้อมทำ
+ใน event loop thread เดียว task ไม่รัน Python code พร้อมกันจริง
+await ไม่รับประกันว่าจะสลับ task ทุกครั้ง หาก awaitable พร้อมแล้วอาจทำต่อทันที
+asyncio.sleep(0) ใช้ยอมคืนการควบคุมอย่างชัดเจน
+
+[CORO-02] อ่านโค้ดอย่างเป็นขั้นตอน
+ขีดเส้นใต้ create_task / gather ว่างานเริ่มถูก schedule ตรงไหน
+วง await ที่อาจพักรอ แล้วดูว่ามีงานอื่นพร้อมทำหรือไม่
+ติดตาม return ว่าคืนให้ใคร และ print เกิดก่อนหรือหลังจุดรอ
+อย่าสับสนลำดับ print ระหว่างงานกับลำดับผลลัพธ์ของ gather
+
+อ้างอิง repo: Week2/asyncio01.py ถึง asyncio04.py,
+Week2/asyncio10.py และ Week3/task_06_loop_introspection.py
+
+[CODE coroutine_basic]
+import asyncio  # ใช้ coroutine และ event loop
+async def greet():  # นิยาม coroutine function
+    await asyncio.sleep(0)  # ยอมคืนการควบคุม
+    return "hello"  # ส่งค่ากลับให้ผู้ await
+async def main():  # จุดรวม workflow
+    print(await greet())  # รัน greet และอ่านค่าที่คืน
+asyncio.run(main())  # เริ่ม loop ในสคริปต์
+[END CODE]
+
+คำสั่งรัน: คัดลอก CODE เป็น demo.py แล้วใช้ python demo.py
+ผลที่คาดหวัง: hello
+ปรับใช้: เปลี่ยน greet เป็น fetch หรือ compute และเก็บค่าจาก await
+
+[LOOP-02] ทำไม loop ค้าง?
+while True ที่ไม่มีการพักรอ -> task อื่นไม่ได้เดิน
+time.sleep / requests.get บน loop thread -> บล็อก loop
+งาน CPU หนัก -> ย้ายไป process ตามความเหมาะสม
+asyncio.to_thread() เหมาะกับ blocking I/O; การ cancel ผู้รอไม่ได้หยุด thread ทันที
+
+========================================================================
+อ่านละเอียด — คู่มือเดิมจาก Week2_Asyncio_Restaurant_Lab_Guide.md
+คำสั่งติดตั้ง/ส่ง request เป็นตัวอย่างสำหรับเตรียม lab ไม่ใช่สิ่งที่ได้รันในการตรวจหนังสือ
+endpoint และค่าห้องเรียนต้องตรวจใหม่ก่อนใช้งาน
+
+Week 2 Asyncio + Restaurant Lab Guide
+=====================================
+
+คู่มือฉบับนี้เขียนไว้ให้ใบอ่านตั้งแต่พื้นฐานมาก ๆ เพื่อเข้าใจว่า Week2 เรียนเรื่อง
+asyncio ยังไง ไฟล์ asyncio01.py ถึง asyncio10.py ทำอะไรไปแล้ว
+และควรเอาความรู้นี้ไปทำไฟล์ Lab ร้านอาหาร 4 ไฟล์ที่เหลือยังไงค่ะ
+
+เป้าหมาย: อ่านคู่มือนี้แล้วเข้าใจภาพรวมของ asynchronous programming และรู้ว่าจะเขียน
+restaurant_01_simple.py, restaurant_01_thread.py, restaurant_01_multiprocess.py,
+restaurant_01_asyncio.py ต่อยังไง โดยไม่ต้องมีพื้นฐานมาก่อน
+
+----------------------------------------------------------------
+
+1. Week2 กำลังเรียนเรื่องอะไร
+-----------------------------
+
+Week2 เรียนเรื่อง Asynchronous Programming หรือการเขียนโปรแกรมให้ “รอหลายงานได้ฉลาดขึ้น”
+โดยเฉพาะงานที่มีช่วงรอ เช่น
+
+- รออาหารสุก
+- รอกาแฟชงเสร็จ
+- รอไฟล์ดาวน์โหลด
+- รอข้อมูลจากอินเทอร์เน็ต
+- รอ database ตอบกลับ
+
+ปัญหาคือ ถ้าเราเขียนแบบปกติ โปรแกรมจะทำงานแบบนี้:
+
+[โค้ด / แผนภาพ : text]
+ทำงาน A -> รอ A เสร็จ -> ทำงาน B -> รอ B เสร็จ -> ทำงาน C -> รอ C เสร็จ
+[จบโค้ด / แผนภาพ]
+
+แต่ asynchronous programming ทำให้โปรแกรมทำงานประมาณนี้:
+
+[โค้ด / แผนภาพ : text]
+เริ่มงาน A -> ระหว่าง A รอ ให้ไปเริ่มงาน B -> ระหว่าง B รอ ให้ไปเริ่มงาน C -> กลับมาเก็บงานที่เสร็จ
+[จบโค้ด / แผนภาพ]
+
+สิ่งสำคัญ: asyncio ไม่ได้แปลว่ามีหลาย CPU หรือหลาย thread เสมอไปค่ะ
+โดยทั่วไป asyncio คือ งานหลายงานสลับกันทำใน thread เดียว ผ่าน event loop
+
+----------------------------------------------------------------
+
+2. คำศัพท์สำคัญที่ต้องรู้ก่อน
+-----------------------------
+
+- คำ: synchronous
+  แปลแบบง่าย: ทำทีละอย่างตามลำดับ
+  จำแบบร้านอาหาร: ทำอาหารจาน A ให้เสร็จก่อน ค่อยเริ่มจาน B
+
+- คำ: asynchronous
+  แปลแบบง่าย: ทำงานแบบสลับระหว่างช่วงรอ
+  จำแบบร้านอาหาร: ระหว่างต้มเส้นอยู่ ไปชงกาแฟให้ลูกค้าอีกคนได้
+
+- คำ: coroutine
+  แปลแบบง่าย: งาน async ที่ยังไม่ถูกรันจริง
+  จำแบบร้านอาหาร: ใบสั่งงานที่เขียนไว้ แต่ยังไม่ได้เอาเข้าครัว
+
+- คำ: event loop
+  แปลแบบง่าย: ตัวจัดคิวงาน async
+  จำแบบร้านอาหาร: ผู้จัดการครัวที่คอยดูว่างานไหนรอ งานไหนทำต่อได้
+
+- คำ: async def
+  แปลแบบง่าย: ประกาศ function แบบ async
+  จำแบบร้านอาหาร: เขียนสูตรงานที่ให้ event loop จัดการได้
+
+- คำ: await
+  แปลแบบง่าย: จุดที่บอกว่า “ตอนนี้รอได้ ไปทำงานอื่นก่อนได้”
+  จำแบบร้านอาหาร: ต้มเส้น 1 นาที ระหว่างนี้ไปทำอย่างอื่นก่อน
+
+- คำ: task
+  แปลแบบง่าย: coroutine ที่ถูกส่งให้ event loop รัน
+  จำแบบร้านอาหาร: ใบสั่งงานที่ถูกเอาเข้าคิวครัวแล้ว
+
+- คำ: asyncio.run()
+  แปลแบบง่าย: เปิด event loop แล้วรันงานหลัก
+  จำแบบร้านอาหาร: เปิดร้าน แล้วเริ่มให้ผู้จัดการครัวทำงาน
+
+- คำ: asyncio.create_task()
+  แปลแบบง่าย: สร้าง task ให้เริ่มรันแบบ concurrent
+  จำแบบร้านอาหาร: ส่งออเดอร์เข้าครัวโดยไม่ต้องยืนรอหน้าหม้อ
+
+- คำ: asyncio.gather()
+  แปลแบบง่าย: รอหลาย task พร้อมกัน
+  จำแบบร้านอาหาร: รอทุกออเดอร์ในชุดนี้เสร็จทั้งหมด
+
+
+----------------------------------------------------------------
+
+3. ภาพใหญ่ของไฟล์ Week2
+-----------------------
+
+- ไฟล์: asyncio01.py
+  หัวข้อ: async def คืออะไร
+  สิ่งที่ใบควรเข้าใจ: แค่ประกาศ async function ยังไม่ได้รัน
+
+- ไฟล์: asyncio02.py
+  หัวข้อ: coroutine object
+  สิ่งที่ใบควรเข้าใจ: เรียก async function แล้วได้ coroutine object แต่ยังไม่ execute
+
+- ไฟล์: asyncio03.py
+  หัวข้อ: event loop
+  สิ่งที่ใบควรเข้าใจ: ใช้ asyncio.run() เพื่อให้ coroutine ทำงานจริง
+
+- ไฟล์: asyncio04.py
+  หัวข้อ: await
+  สิ่งที่ใบควรเข้าใจ: coroutine หยุดรอแบบไม่ block event loop
+
+- ไฟล์: asyncio05.py
+  หัวข้อ: sequential async
+  สิ่งที่ใบควรเข้าใจ: ใช้ await ทีละบรรทัดยังทำงานเรียงกันอยู่
+
+- ไฟล์: asyncio06.py
+  หัวข้อ: create_task()
+  สิ่งที่ใบควรเข้าใจ: สร้าง task ให้ไปทำงานเบื้องหลังได้
+
+- ไฟล์: asyncio07.py
+  หัวข้อ: two concurrent tasks
+  สิ่งที่ใบควรเข้าใจ: สร้าง 2 task แล้วเวลารวมใกล้ 1 วินาที ไม่ใช่ 2 วินาที
+
+- ไฟล์: asyncio08.py
+  หัวข้อ: task interleaving
+  สิ่งที่ใบควรเข้าใจ: เห็นการสลับงานระหว่าง kitchen/bar ใน thread เดียว
+
+- ไฟล์: asyncio09.py
+  หัวข้อ: dynamic task list
+  สิ่งที่ใบควรเข้าใจ: สร้าง task หลายตัวจาก list ลูกค้า
+
+- ไฟล์: asyncio10.py
+  หัวข้อ: return values
+  สิ่งที่ใบควรเข้าใจ: task สามารถ return ค่า แล้วเอาผลลัพธ์มาใช้ต่อได้
+
+- ไฟล์: restaurant_01_simple.py
+  หัวข้อ: Lab
+  สิ่งที่ใบควรเข้าใจ: เขียนร้านอาหารแบบ synchronous
+
+- ไฟล์: restaurant_01_thread.py
+  หัวข้อ: Lab
+  สิ่งที่ใบควรเข้าใจ: เขียนร้านอาหารแบบ threading
+
+- ไฟล์: restaurant_01_multiprocess.py
+  หัวข้อ: Lab
+  สิ่งที่ใบควรเข้าใจ: เขียนร้านอาหารแบบ multiprocessing
+
+- ไฟล์: restaurant_01_asyncio.py
+  หัวข้อ: Lab
+  สิ่งที่ใบควรเข้าใจ: เขียนร้านอาหารแบบ asyncio
+
+
+----------------------------------------------------------------
+
+4. อธิบายไฟล์ asyncio01.py ถึง asyncio10.py
+-------------------------------------------
+
+4.1 asyncio01.py — The First Coroutine Function
+-----------------------------------------------
+
+แนวคิดหลัก:
+
+[โค้ด / แผนภาพ : python]
+async def greet():
+    print("Hello from the Coroutine")
+
+print(type(greet))
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ:
+
+- async def greet() คือการประกาศ function แบบ async
+- แต่ตัว greet เองยังเป็น function อยู่
+- ยังไม่มีข้อความ Hello from the Coroutine ออกมา เพราะยังไม่ได้เรียกและยังไม่ได้รันด้วย
+  event loop
+
+สิ่งที่ควรจำ:
+
+[โค้ด / แผนภาพ : text]
+async def = สร้าง function ที่สามารถกลายเป็น coroutine ได้
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+4.2 asyncio02.py — The Coroutine Object
+---------------------------------------
+
+แนวคิดหลัก:
+
+[โค้ด / แผนภาพ : python]
+coro_object = greet()
+print(type(coro_object))
+coro_object.close()
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ:
+
+- พอเรียก greet() จะได้ coroutine object
+- coroutine object ยังไม่ทำงานเอง
+- ถ้าสร้าง coroutine แล้วไม่รัน ควร close() เพื่อไม่ให้ Python เตือนว่า coroutine was
+  never awaited
+
+เปรียบเทียบง่าย ๆ:
+
+[โค้ด / แผนภาพ : text]
+greet       = สูตรอาหาร
+
+greet()     = ใบสั่งอาหารที่ถูกเขียนแล้ว
+
+await/run   = เอาใบสั่งอาหารไปให้ครัวทำจริง
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+4.3 asyncio03.py — The Event Loop
+---------------------------------
+
+แนวคิดหลัก:
+
+[โค้ด / แผนภาพ : python]
+coro_object = greet()
+asyncio.run(coro_object)
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ:
+
+- asyncio.run() คือการเปิด event loop
+- event loop จะรับ coroutine ไปทำงานจริง
+- ตอนนี้ข้อความใน greet() ถึงจะ print ออกมา
+
+จำสั้น ๆ:
+
+[โค้ด / แผนภาพ : text]
+coroutine จะทำงานจริงเมื่อถูก await หรือถูกส่งให้ event loop ผ่าน asyncio.run()
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+4.4 asyncio04.py — The await Keyword
+------------------------------------
+
+แนวคิดหลัก:
+
+[โค้ด / แผนภาพ : python]
+async def main():
+    print("Task Started")
+    await asyncio.sleep(1)
+    print("Task Finished")
+[จบโค้ด / แผนภาพ]
+
+await asyncio.sleep(1) ไม่เหมือน time.sleep(1):
+
+- คำสั่ง: time.sleep(1)
+  พฤติกรรม: block thread ทิ้งไว้ 1 วินาที ทำอย่างอื่นไม่ได้
+
+- คำสั่ง: await asyncio.sleep(1)
+  พฤติกรรม: รอ 1 วินาทีแบบคืน control ให้ event loop ไปจัดการงานอื่นได้
+
+
+ในไฟล์นี้มี task เดียว เลยยังไม่เห็นความต่างมาก แต่เป็นพื้นฐานของไฟล์ถัดไปค่ะ
+
+----------------------------------------------------------------
+
+4.5 asyncio05.py — Sequential Execution
+---------------------------------------
+
+แนวคิดหลัก:
+
+[โค้ด / แผนภาพ : python]
+await serve_customer("A")
+await serve_customer("B")
+[จบโค้ด / แผนภาพ]
+
+ถึงจะเป็น async function แต่ถ้าเขียน await ต่อกันตรง ๆ แบบนี้:
+
+[โค้ด / แผนภาพ : text]
+รอ A เสร็จ -> ค่อยเริ่ม B
+[จบโค้ด / แผนภาพ]
+
+ดังนั้นถ้า A ใช้ 1 วินาที และ B ใช้ 1 วินาที เวลารวมจะประมาณ 2 วินาที
+
+ข้อควรจำ:
+
+[โค้ด / แผนภาพ : text]
+async ไม่ได้ทำให้เร็วเอง ถ้า await ทีละอันแบบเรียงกัน ก็ยัง sequential
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+4.6 asyncio06.py — Creating a Concurrent Task
+---------------------------------------------
+
+แนวคิดหลัก:
+
+[โค้ด / แผนภาพ : python]
+task1 = asyncio.create_task(cook_spaghetti("A"))
+print("Main program can do other things...")
+await task1
+[จบโค้ด / แผนภาพ]
+
+จุดสำคัญ:
+
+- asyncio.create_task(...) ส่ง coroutine เข้า event loop
+- task เริ่มมีโอกาสทำงานแบบเบื้องหลัง
+- main program ยังสามารถทำงานอื่นต่อได้
+- สุดท้ายต้อง await task1 เพื่อรอให้ task เสร็จ
+
+ภาพจำ:
+
+[โค้ด / แผนภาพ : text]
+create_task = ฝากงานไว้กับ event loop ก่อน
+await task  = กลับมารอรับผลลัพธ์ตอนต้องการ
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+4.7 asyncio07.py — Dual Tasks Concurrency
+-----------------------------------------
+
+แนวคิดหลัก:
+
+[โค้ด / แผนภาพ : python]
+task_a = asyncio.create_task(cook_spaghetti("A"))
+task_b = asyncio.create_task(cook_spaghetti("B"))
+
+await task_a
+await task_b
+[จบโค้ด / แผนภาพ]
+
+ทำไมเวลารวมประมาณ 1 วินาที ไม่ใช่ 2 วินาที?
+
+เพราะ task A และ task B ถูกสร้างก่อนทั้งคู่ จากนั้นทั้งสอง task มีโอกาสเริ่มทำงานพร้อม ๆ
+กันใน event loop
+
+ลำดับประมาณนี้:
+
+[โค้ด / แผนภาพ : text]
+สร้าง task A
+สร้าง task B
+A เริ่มทำอาหาร -> await sleep
+B เริ่มทำอาหาร -> await sleep
+A เสร็จ
+B เสร็จ
+[จบโค้ด / แผนภาพ]
+
+ข้อควรจำ:
+
+[โค้ด / แผนภาพ : text]
+ถ้าต้องการ concurrency ต้องสร้าง task ก่อน แล้วค่อย await
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+4.8 asyncio08.py — Task Interleaving
+------------------------------------
+
+ไฟล์นี้แสดงภาพการสลับงานชัดมาก:
+
+[โค้ด / แผนภาพ : python]
+task_kitchen = asyncio.create_task(kitchen_crew())
+task_bar = asyncio.create_task(bar_crew())
+
+await task_kitchen
+await task_bar
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่ควรสังเกต:
+
+- kitchen เริ่มต้มเส้นแล้ว await asyncio.sleep(1)
+- ระหว่าง kitchen รอ event loop ไปให้ bar ทำงาน
+- bar เริ่มบดกาแฟแล้ว await asyncio.sleep(1)
+- พอเวลาครบ event loop กลับมาให้แต่ละ task ทำต่อ
+
+นี่คือหัวใจของ asyncio:
+
+[โค้ด / แผนภาพ : text]
+ไม่ได้ทำพร้อมกันจริงแบบหลาย CPU แต่สลับงานตอนแต่ละงานกำลังรอ
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+4.9 asyncio09.py — Dynamically Tracking Tasks in a List
+-------------------------------------------------------
+
+แนวคิดหลัก:
+
+[โค้ด / แผนภาพ : python]
+customers = ["A", "B", "C", "D"]
+task_list = []
+
+for name in customers:
+    t = asyncio.create_task(serve_customer(name))
+    task_list.append(t)
+
+for t in task_list:
+    await t
+[จบโค้ด / แผนภาพ]
+
+นี่คือ pattern ที่สำคัญมาก เพราะในชีวิตจริงจำนวนงานมักไม่ได้มีแค่ 2 งานตายตัว
+
+เช่น:
+
+- ลูกค้า 4 คน
+- URL 100 ลิงก์
+- ไฟล์ 30 ไฟล์
+- query database หลายอัน
+
+ขั้นตอนคือ:
+
+1. มี list ของงาน เช่น customers
+2. loop สร้าง task จากแต่ละ item
+3. เก็บ task ไว้ใน task_list
+4. loop รอทุก task ให้เสร็จ
+
+แบบที่อ่านง่ายขึ้นในอนาคตคือใช้ asyncio.gather():
+
+[โค้ด / แผนภาพ : python]
+tasks = []
+
+for name in customers:
+    tasks.append(asyncio.create_task(serve_customer(name)))
+
+await asyncio.gather(*tasks)
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+4.10 asyncio10.py — Extracting Return Values from Tasks
+-------------------------------------------------------
+
+แนวคิดหลัก:
+
+[โค้ด / แผนภาพ : python]
+task_a = asyncio.create_task(calculate_bill("A", 100))
+task_b = asyncio.create_task(calculate_bill("B", 200))
+
+result_a = await task_a
+result_b = await task_b
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่เพิ่มจากไฟล์ก่อน ๆ:
+
+- coroutine สามารถ return ค่าได้
+- task ที่ await แล้วจะคืนค่ากลับมา
+- เอาค่าที่ได้ไปคำนวณต่อได้
+
+ตัวอย่าง:
+
+[โค้ด / แผนภาพ : python]
+async def calculate_bill(customer, base_price):
+    await asyncio.sleep(2)
+    final_price = base_price * 1.07
+    return final_price
+[จบโค้ด / แผนภาพ]
+
+ผลลัพธ์:
+
+[โค้ด / แผนภาพ : text]
+A: 100 + VAT 7% = 107
+B: 200 + VAT 7% = 214
+Total = 321
+[จบโค้ด / แผนภาพ]
+
+ข้อควรจำ:
+
+[โค้ด / แผนภาพ : text]
+await task ไม่ได้แค่รอ task เสร็จ แต่ยังเอาค่า return กลับมาได้ด้วย
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+5. เปรียบเทียบ 4 วิธีที่จะใช้ใน Restaurant Lab
+----------------------------------------------
+
+Lab ร้านอาหาร 4 ไฟล์น่าจะให้ใบเขียน logic เดียวกัน แต่ใช้วิธีรันงานต่างกันค่ะ
+
+- ไฟล์: restaurant_01_simple.py
+  วิธีทำงาน: synchronous
+  เวลาที่คาดหวังถ้ามีลูกค้า 3 คน คนละ 2 วิ: ประมาณ 6 วิ
+  จุดประสงค์: เห็น baseline ทำทีละคน
+
+- ไฟล์: restaurant_01_thread.py
+  วิธีทำงาน: threading
+  เวลาที่คาดหวังถ้ามีลูกค้า 3 คน คนละ 2 วิ: ประมาณ 2 วิ
+  จุดประสงค์: เห็นงานรอ I/O ทำพร้อมกันผ่านหลาย thread
+
+- ไฟล์: restaurant_01_multiprocess.py
+  วิธีทำงาน: multiprocessing
+  เวลาที่คาดหวังถ้ามีลูกค้า 3 คน คนละ 2 วิ: ประมาณ 2 วิ
+  จุดประสงค์: เห็นการแยก process จริง
+
+- ไฟล์: restaurant_01_asyncio.py
+  วิธีทำงาน: asyncio
+  เวลาที่คาดหวังถ้ามีลูกค้า 3 คน คนละ 2 วิ: ประมาณ 2 วิ
+  จุดประสงค์: เห็น concurrency แบบ event loop/thread เดียว
+
+
+หมายเหตุ: ถ้างานเป็น sleep() หรือ “รอ” threading กับ asyncio จะเห็นเร็วขึ้นชัดมาก
+ถ้างานเป็นคำนวณหนัก CPU จริง ๆ multiprocessing จะเหมาะกว่า
+
+----------------------------------------------------------------
+
+6. แบบจำลองร้านอาหารสำหรับ Lab
+------------------------------
+
+เพื่อให้ทั้ง 4 ไฟล์เทียบกันง่าย ให้ใช้โจทย์เดียวกัน:
+
+[โค้ด / แผนภาพ : text]
+ร้านอาหารมีลูกค้า A, B, C
+แต่ละคนสั่ง spaghetti
+การทำอาหาร 1 จานใช้เวลา 2 วินาที
+ให้แสดง log ว่าเริ่มทำอาหาร / ทำเสร็จ / เวลารวม
+[จบโค้ด / แผนภาพ]
+
+Output โดยประมาณ:
+
+[โค้ด / แผนภาพ : text]
+Wed Jul  1 10:00:00 2026 -> Start cooking spaghetti for customer A
+Wed Jul  1 10:00:02 2026 -> Finished spaghetti for customer A
+...
+Total time: 6.00 seconds
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่ทุกไฟล์ควรมี:
+
+- ส่วน: customers = ["A", "B", "C"]
+  ทำอะไร: รายชื่อลูกค้า
+
+- ส่วน: cook_spaghetti(customer)
+  ทำอะไร: function หลักของการทำอาหาร
+
+- ส่วน: main()
+  ทำอะไร: จุดเริ่มจัดคิวงาน
+
+- ส่วน: start = time()
+  ทำอะไร: จับเวลาเริ่ม
+
+- ส่วน: print(f"Total time: ...")
+  ทำอะไร: สรุปเวลารวม
+
+
+----------------------------------------------------------------
+
+7. Lab 1 — restaurant_01_simple.py
+----------------------------------
+
+เป้าหมาย
+------------
+
+เขียนร้านอาหารแบบ synchronous คือทำอาหารทีละคนตามลำดับ
+
+ความรู้ที่ใช้
+-------------
+
+[โค้ด / แผนภาพ : python]
+from time import sleep, ctime, time
+[จบโค้ด / แผนภาพ]
+
+- คำสั่ง: sleep(2)
+  ใช้ทำอะไร: จำลองเวลาทำอาหาร 2 วินาที แบบ blocking
+
+- คำสั่ง: ctime()
+  ใช้ทำอะไร: print เวลาปัจจุบันให้อ่านง่าย
+
+- คำสั่ง: time()
+  ใช้ทำอะไร: จับเวลารวม
+
+
+โครงสร้างที่ควรเขียน
+--------------------
+
+[โค้ด / แผนภาพ : python]
+from time import sleep, ctime, time
+
+
+def cook_spaghetti(customer):
+    print(f"{ctime()} -> Start cooking spaghetti for customer {customer}")
+    sleep(2)
+    print(f"{ctime()} -> Finished spaghetti for customer {customer}")
+
+
+def main():
+    start = time()
+    customers = ["A", "B", "C"]
+
+    for customer in customers:
+        cook_spaghetti(customer)
+
+    print(f"Total time: {time() - start:.2f} seconds")
+
+
+if __name__ == "__main__":
+    main()
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่ควรเกิดขึ้น
+------------------
+
+[โค้ด / แผนภาพ : text]
+A เริ่ม -> A เสร็จ -> B เริ่ม -> B เสร็จ -> C เริ่ม -> C เสร็จ
+[จบโค้ด / แผนภาพ]
+
+เวลารวมควรประมาณ:
+
+[โค้ด / แผนภาพ : text]
+2 + 2 + 2 = 6 seconds
+[จบโค้ด / แผนภาพ]
+
+คำถามทบทวน
+------------
+
+1. ทำไม B ต้องรอ A เสร็จก่อน?
+2. sleep(2) ทำให้โปรแกรมทำอะไรไม่ได้เลยระหว่างรอใช่ไหม?
+3. ถ้ามีลูกค้า 10 คน เวลาจะเพิ่มเป็นประมาณกี่วินาที?
+
+----------------------------------------------------------------
+
+8. Lab 2 — restaurant_01_thread.py
+----------------------------------
+
+เป้าหมาย
+------------
+
+เขียนร้านอาหารแบบใช้ thread เพื่อให้ลูกค้า A, B, C เริ่มทำอาหารได้ใกล้เคียงกัน
+
+ความรู้ที่ใช้
+-------------
+
+[โค้ด / แผนภาพ : python]
+import threading
+from time import sleep, ctime, time
+[จบโค้ด / แผนภาพ]
+
+- คำสั่ง: threading.Thread(...)
+  ใช้ทำอะไร: สร้าง thread ใหม่
+
+- คำสั่ง: target=cook_spaghetti
+  ใช้ทำอะไร: บอกว่า thread นี้จะรัน function ไหน
+
+- คำสั่ง: args=(customer,)
+  ใช้ทำอะไร: ส่งค่า customer เข้า function
+
+- คำสั่ง: start()
+  ใช้ทำอะไร: เริ่ม thread
+
+- คำสั่ง: join()
+  ใช้ทำอะไร: รอ thread จบ
+
+
+โครงสร้างที่ควรเขียน
+--------------------
+
+[โค้ด / แผนภาพ : python]
+import threading
+from time import sleep, ctime, time
+
+
+def cook_spaghetti(customer):
+    thread_name = threading.current_thread().name
+    print(f"{ctime()} -> [{thread_name}] Start cooking spaghetti for customer {customer}")
+    sleep(2)
+    print(f"{ctime()} -> [{thread_name}] Finished spaghetti for customer {customer}")
+
+
+def main():
+    start = time()
+    customers = ["A", "B", "C"]
+    threads = []
+
+    for customer in customers:
+        t = threading.Thread(
+            target=cook_spaghetti,
+            args=(customer,),
+            name=f"Chef-{customer}"
+        )
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    print(f"Total time: {time() - start:.2f} seconds")
+
+
+if __name__ == "__main__":
+    main()
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่ควรเกิดขึ้น
+------------------
+
+[โค้ด / แผนภาพ : text]
+A เริ่ม
+B เริ่ม
+C เริ่ม
+รอประมาณ 2 วิ
+A/B/C เสร็จใกล้ ๆ กัน
+[จบโค้ด / แผนภาพ]
+
+เวลารวมควรประมาณ:
+
+[โค้ด / แผนภาพ : text]
+2 seconds
+[จบโค้ด / แผนภาพ]
+
+ข้อควรระวัง
+------------
+
+args=(customer,) ต้องมี comma หลัง customer เพราะ Python ต้องการ tuple
+
+ผิด:
+
+[โค้ด / แผนภาพ : python]
+args=(customer)
+[จบโค้ด / แผนภาพ]
+
+ถูก:
+
+[โค้ด / แผนภาพ : python]
+args=(customer,)
+[จบโค้ด / แผนภาพ]
+
+คำถามทบทวน
+------------
+
+1. ถ้าไม่เรียก start() thread จะทำงานไหม?
+2. ถ้าไม่เรียก join() main program อาจจบก่อน thread ทำงานเสร็จไหม?
+3. Thread เหมาะกับงานรอ เช่น sleep() หรือ network ไหม?
+
+----------------------------------------------------------------
+
+9. Lab 3 — restaurant_01_multiprocess.py
+----------------------------------------
+
+เป้าหมาย
+------------
+
+เขียนร้านอาหารแบบใช้ process แยกจริง ๆ เพื่อให้เห็นว่าแต่ละงานสามารถไปรันใน process
+ของตัวเองได้
+
+ความรู้ที่ใช้
+-------------
+
+[โค้ด / แผนภาพ : python]
+import os
+import multiprocessing
+from time import sleep, ctime, time
+[จบโค้ด / แผนภาพ]
+
+- คำสั่ง: multiprocessing.Process(...)
+  ใช้ทำอะไร: สร้าง process ใหม่
+
+- คำสั่ง: target=cook_spaghetti
+  ใช้ทำอะไร: function ที่ process ลูกจะรัน
+
+- คำสั่ง: args=(customer,)
+  ใช้ทำอะไร: ส่ง argument เข้า process
+
+- คำสั่ง: start()
+  ใช้ทำอะไร: เริ่ม process
+
+- คำสั่ง: join()
+  ใช้ทำอะไร: รอ process จบ
+
+- คำสั่ง: os.getpid()
+  ใช้ทำอะไร: ดู process id ปัจจุบัน
+
+
+โครงสร้างที่ควรเขียน
+--------------------
+
+[โค้ด / แผนภาพ : python]
+import os
+import multiprocessing
+from time import sleep, ctime, time
+
+
+def cook_spaghetti(customer):
+    pid = os.getpid()
+    print(f"{ctime()} -> [PID {pid}] Start cooking spaghetti for customer {customer}")
+    sleep(2)
+    print(f"{ctime()} -> [PID {pid}] Finished spaghetti for customer {customer}")
+
+
+def main():
+    start = time()
+    customers = ["A", "B", "C"]
+    processes = []
+
+    for customer in customers:
+        p = multiprocessing.Process(
+            target=cook_spaghetti,
+            args=(customer,)
+        )
+        processes.append(p)
+        p.start()
+
+    for p in processes:
+        p.join()
+
+    print(f"Total time: {time() - start:.2f} seconds")
+
+
+if __name__ == "__main__":
+    main()
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่ควรเกิดขึ้น
+------------------
+
+[โค้ด / แผนภาพ : text]
+ลูกค้า A, B, C ถูกทำใน process แยกกัน
+แต่ละ process มี PID ต่างกัน
+เวลารวมประมาณ 2 วินาที
+[จบโค้ด / แผนภาพ]
+
+ข้อควรระวังสำคัญ
+----------------
+
+ต้องมีบรรทัดนี้เสมอ:
+
+[โค้ด / แผนภาพ : python]
+if __name__ == "__main__":
+    main()
+[จบโค้ด / แผนภาพ]
+
+โดยเฉพาะบน Windows ถ้าไม่มี guard นี้ multiprocessing อาจสร้าง process วนผิดปกติได้ค่ะ
+
+คำถามทบทวน
+------------
+
+1. PID ของแต่ละ process เหมือนกันหรือต่างกัน?
+2. ทำไม multiprocessing หนักกว่า threading?
+3. ถ้างานเป็นคำนวณหนัก CPU จริง ๆ multiprocessing มีประโยชน์กว่า asyncio ไหม?
+
+----------------------------------------------------------------
+
+10. Lab 4 — restaurant_01_asyncio.py
+------------------------------------
+
+เป้าหมาย
+------------
+
+เขียนร้านอาหารแบบ asyncio โดยใช้ event loop จัดการหลาย task ใน thread เดียว
+
+ความรู้ที่ใช้
+-------------
+
+[โค้ด / แผนภาพ : python]
+import asyncio
+from time import ctime, time
+[จบโค้ด / แผนภาพ]
+
+- คำสั่ง: async def
+  ใช้ทำอะไร: ประกาศ coroutine function
+
+- คำสั่ง: await asyncio.sleep(2)
+  ใช้ทำอะไร: รอแบบ non-blocking
+
+- คำสั่ง: asyncio.create_task(...)
+  ใช้ทำอะไร: สร้าง task ให้ event loop รัน
+
+- คำสั่ง: asyncio.gather(*tasks)
+  ใช้ทำอะไร: รอ task ทุกตัวให้เสร็จ
+
+- คำสั่ง: asyncio.run(main())
+  ใช้ทำอะไร: เปิด event loop และรัน main coroutine
+
+
+โครงสร้างที่ควรเขียน
+--------------------
+
+[โค้ด / แผนภาพ : python]
+import asyncio
+from time import ctime, time
+
+
+async def cook_spaghetti(customer):
+    print(f"{ctime()} -> Start cooking spaghetti for customer {customer}")
+    await asyncio.sleep(2)
+    print(f"{ctime()} -> Finished spaghetti for customer {customer}")
+
+
+async def main():
+    start = time()
+    customers = ["A", "B", "C"]
+    tasks = []
+
+    for customer in customers:
+        task = asyncio.create_task(cook_spaghetti(customer))
+        tasks.append(task)
+
+    await asyncio.gather(*tasks)
+
+    print(f"Total time: {time() - start:.2f} seconds")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+[จบโค้ด / แผนภาพ]
+
+สิ่งที่ควรเกิดขึ้น
+------------------
+
+[โค้ด / แผนภาพ : text]
+A เริ่ม
+B เริ่ม
+C เริ่ม
+รอประมาณ 2 วิ
+A/B/C เสร็จใกล้ ๆ กัน
+Total time ประมาณ 2 วิ
+[จบโค้ด / แผนภาพ]
+
+ทำไม asyncio ถึงเร็วกว่า simple ในโจทย์นี้
+------------------------------------------
+
+เพราะ await asyncio.sleep(2) เป็นการบอก event loop ว่า:
+
+[โค้ด / แผนภาพ : text]
+ตอนนี้ task นี้กำลังรออยู่ ไปให้ task อื่นทำงานก่อนได้
+[จบโค้ด / แผนภาพ]
+
+แต่ sleep(2) ใน simple version คือ:
+
+[โค้ด / แผนภาพ : text]
+หยุดทั้งโปรแกรมไว้ 2 วินาที
+[จบโค้ด / แผนภาพ]
+
+คำถามทบทวน
+------------
+
+1. ถ้าเปลี่ยน await asyncio.sleep(2) เป็น time.sleep(2) จะยัง concurrent อยู่ไหม?
+2. ทำไมต้องใช้ asyncio.run(main())?
+3. asyncio.gather(*tasks) ช่วยให้โค้ดอ่านง่ายกว่าการ await ทีละ task ยังไง?
+
+----------------------------------------------------------------
+
+11. Example รวม — Expected Behavior ของทั้ง 4 ไฟล์
+--------------------------------------------------
+
+ถ้าลูกค้า 3 คน และแต่ละคนใช้เวลา 2 วินาที ผลที่คาดหวังควรเป็นประมาณนี้:
+
+- ไฟล์: restaurant_01_simple.py
+  เริ่มพร้อมกันไหม: ไม่
+  เวลารวมโดยประมาณ: 6 วิ
+  สิ่งที่สังเกต: ทำทีละคน A -> B -> C
+
+- ไฟล์: restaurant_01_thread.py
+  เริ่มพร้อมกันไหม: ใช่
+  เวลารวมโดยประมาณ: 2 วิ
+  สิ่งที่สังเกต: หลาย thread, thread name ต่างกัน
+
+- ไฟล์: restaurant_01_multiprocess.py
+  เริ่มพร้อมกันไหม: ใช่
+  เวลารวมโดยประมาณ: 2 วิ
+  สิ่งที่สังเกต: หลาย process, PID ต่างกัน
+
+- ไฟล์: restaurant_01_asyncio.py
+  เริ่มพร้อมกันไหม: ใช่แบบ event loop
+  เวลารวมโดยประมาณ: 2 วิ
+  สิ่งที่สังเกต: thread เดียวก็สลับ task ได้ถ้าเป็นงานรอ
+
+
+ตัวอย่าง output แบบ simple:
+
+[โค้ด / แผนภาพ : text]
+Wed Jul  1 10:00:00 2026 -> Start cooking spaghetti for customer A
+Wed Jul  1 10:00:02 2026 -> Finished spaghetti for customer A
+Wed Jul  1 10:00:02 2026 -> Start cooking spaghetti for customer B
+Wed Jul  1 10:00:04 2026 -> Finished spaghetti for customer B
+Wed Jul  1 10:00:04 2026 -> Start cooking spaghetti for customer C
+Wed Jul  1 10:00:06 2026 -> Finished spaghetti for customer C
+Total time: 6.00 seconds
+[จบโค้ด / แผนภาพ]
+
+ตัวอย่าง output แบบ asyncio/thread/process:
+
+[โค้ด / แผนภาพ : text]
+Wed Jul  1 10:00:00 2026 -> Start cooking spaghetti for customer A
+Wed Jul  1 10:00:00 2026 -> Start cooking spaghetti for customer B
+Wed Jul  1 10:00:00 2026 -> Start cooking spaghetti for customer C
+Wed Jul  1 10:00:02 2026 -> Finished spaghetti for customer A
+Wed Jul  1 10:00:02 2026 -> Finished spaghetti for customer B
+Wed Jul  1 10:00:02 2026 -> Finished spaghetti for customer C
+Total time: 2.00 seconds
+[จบโค้ด / แผนภาพ]
+
+หมายเหตุ: ลำดับ output ของ concurrent version อาจไม่เหมือนเดิมทุกครั้ง
+เพราะงานทำพร้อมกัน/สลับกันค่ะ
+
+----------------------------------------------------------------
+
+12. Mini Lab สำหรับใบลองทำเอง
+-----------------------------
+
+Mini Lab A — เพิ่มลูกค้า
+------------------------
+
+แก้ทุกไฟล์ให้มีลูกค้า 5 คน:
+
+[โค้ด / แผนภาพ : python]
+customers = ["A", "B", "C", "D", "E"]
+[จบโค้ด / แผนภาพ]
+
+แล้วตอบคำถาม:
+
+- ไฟล์: simple
+  เวลาที่ควรได้ถ้าคนละ 2 วิ: ประมาณ 10 วิ
+
+- ไฟล์: thread
+  เวลาที่ควรได้ถ้าคนละ 2 วิ: ประมาณ 2 วิ
+
+- ไฟล์: multiprocess
+  เวลาที่ควรได้ถ้าคนละ 2 วิ: ประมาณ 2 วิ
+
+- ไฟล์: asyncio
+  เวลาที่ควรได้ถ้าคนละ 2 วิ: ประมาณ 2 วิ
+
+
+----------------------------------------------------------------
+
+Mini Lab B — เพิ่มเมนูอาหาร
+---------------------------
+
+เปลี่ยนจาก spaghetti อย่างเดียว เป็นให้แต่ละลูกค้าสั่งคนละเมนู:
+
+[โค้ด / แผนภาพ : python]
+orders = [
+    ("A", "spaghetti"),
+    ("B", "steak"),
+    ("C", "salad"),
+]
+[จบโค้ด / แผนภาพ]
+
+function อาจเปลี่ยนเป็น:
+
+[โค้ด / แผนภาพ : python]
+def cook_order(customer, menu):
+    print(f"Start cooking {menu} for customer {customer}")
+[จบโค้ด / แผนภาพ]
+
+สำหรับ asyncio:
+
+[โค้ด / แผนภาพ : python]
+async def cook_order(customer, menu):
+    print(f"Start cooking {menu} for customer {customer}")
+    await asyncio.sleep(2)
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+Mini Lab C — คืนค่าราคาอาหารแบบ asyncio10.py
+--------------------------------------------
+
+ลองให้ restaurant_01_asyncio.py return ราคาอาหารกลับมา:
+
+[โค้ด / แผนภาพ : python]
+async def cook_order(customer, price):
+    await asyncio.sleep(2)
+    return price
+[จบโค้ด / แผนภาพ]
+
+แล้วใน main():
+
+[โค้ด / แผนภาพ : python]
+results = await asyncio.gather(*tasks)
+print(f"Total income: {sum(results)} baht")
+[จบโค้ด / แผนภาพ]
+
+คำถาม:
+
+1. results เป็น list ของอะไร?
+2. ทำไม asyncio.gather() ถึงเหมาะกับการเก็บ return value จากหลาย task?
+
+----------------------------------------------------------------
+
+13. Checklist ก่อนส่ง Lab
+-------------------------
+
+ใช้ checklist นี้เช็กทั้ง 4 ไฟล์ค่ะ
+
+Common checklist
+----------------
+
+- [ ] มี customers = ["A", "B", "C"]
+- [ ] มี function ทำอาหาร เช่น cook_spaghetti(customer)
+- [ ] มี log ตอนเริ่มและตอนเสร็จ
+- [ ] มีการจับเวลารวมด้วย time()
+- [ ] มี if __name__ == "__main__":
+- [ ] รันแล้วไม่มี error
+
+Simple checklist
+----------------
+
+- [ ] ใช้ sleep(2)
+- [ ] ใช้ for customer in customers: แล้วเรียก function ตรง ๆ
+- [ ] เวลารวมประมาณ 6 วินาที
+
+Thread checklist
+----------------
+
+- [ ] import threading
+- [ ] สร้าง threading.Thread(...)
+- [ ] เรียก start() ทุก thread
+- [ ] เรียก join() ทุก thread
+- [ ] เวลารวมประมาณ 2 วินาที
+
+Multiprocess checklist
+----------------------
+
+- [ ] import multiprocessing
+- [ ] สร้าง multiprocessing.Process(...)
+- [ ] เรียก start() ทุก process
+- [ ] เรียก join() ทุก process
+- [ ] มี if __name__ == "__main__": แน่นอน
+- [ ] เวลารวมประมาณ 2 วินาที
+
+Asyncio checklist
+-----------------
+
+- [ ] import asyncio
+- [ ] function หลักเป็น async def
+- [ ] ใช้ await asyncio.sleep(2) ไม่ใช่ time.sleep(2)
+- [ ] สร้าง task ด้วย asyncio.create_task(...)
+- [ ] รอทุก task ด้วย await asyncio.gather(*tasks) หรือ await ทีละ task
+- [ ] เริ่มโปรแกรมด้วย asyncio.run(main())
+- [ ] เวลารวมประมาณ 2 วินาที
+
+----------------------------------------------------------------
+
+14. ข้อผิดพลาดที่เจอบ่อย
+------------------------
+
+14.1 เรียก async function แล้วไม่มีอะไรเกิดขึ้น
+-----------------------------------------------
+
+ผิด:
+
+[โค้ด / แผนภาพ : python]
+async def main():
+    print("Hello")
+
+main()
+[จบโค้ด / แผนภาพ]
+
+เพราะ main() จะคืน coroutine object แต่ยังไม่รันจริง
+
+ถูก:
+
+[โค้ด / แผนภาพ : python]
+asyncio.run(main())
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+14.2 ใช้ time.sleep() ใน async function
+---------------------------------------
+
+ผิด:
+
+[โค้ด / แผนภาพ : python]
+async def cook():
+    time.sleep(2)
+[จบโค้ด / แผนภาพ]
+
+เพราะมัน block ทั้ง event loop
+
+ถูก:
+
+[โค้ด / แผนภาพ : python]
+async def cook():
+    await asyncio.sleep(2)
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+14.3 สร้าง task แล้วไม่ได้ await
+--------------------------------
+
+ผิด:
+
+[โค้ด / แผนภาพ : python]
+asyncio.create_task(cook_spaghetti("A"))
+[จบโค้ด / แผนภาพ]
+
+ถ้า main จบเร็ว task อาจยังทำไม่เสร็จ
+
+ถูก:
+
+[โค้ด / แผนภาพ : python]
+task = asyncio.create_task(cook_spaghetti("A"))
+await task
+[จบโค้ด / แผนภาพ]
+
+หรือหลาย task:
+
+[โค้ด / แผนภาพ : python]
+await asyncio.gather(*tasks)
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+14.4 ลืม comma ใน args
+----------------------
+
+ผิด:
+
+[โค้ด / แผนภาพ : python]
+args=(customer)
+[จบโค้ด / แผนภาพ]
+
+ถูก:
+
+[โค้ด / แผนภาพ : python]
+args=(customer,)
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+14.5 ลืม if __name__ == "__main__" ใน multiprocessing
+-----------------------------------------------------
+
+ควรมีเสมอ:
+
+[โค้ด / แผนภาพ : python]
+if __name__ == "__main__":
+    main()
+[จบโค้ด / แผนภาพ]
+
+โดยเฉพาะตอนรันบน Windows ค่ะ
+
+----------------------------------------------------------------
+
+15. คำสั่งสำหรับรันตรวจงาน
+--------------------------
+
+รันทีละไฟล์:
+
+[โค้ด / แผนภาพ : bash]
+python3 Week2/restaurant_01_simple.py
+python3 Week2/restaurant_01_thread.py
+python3 Week2/restaurant_01_multiprocess.py
+python3 Week2/restaurant_01_asyncio.py
+[จบโค้ด / แผนภาพ]
+
+ตรวจ syntax ทั้งชุด:
+
+[โค้ด / แผนภาพ : bash]
+python3 -m py_compile \
+  Week2/restaurant_01_simple.py \
+  Week2/restaurant_01_thread.py \
+  Week2/restaurant_01_multiprocess.py \
+  Week2/restaurant_01_asyncio.py
+[จบโค้ด / แผนภาพ]
+
+ถ้าจะรันตัวอย่าง asyncio01-10 ทั้งหมด:
+
+[โค้ด / แผนภาพ : bash]
+for f in Week2/asyncio{01..10}.py; do
+  echo "===== $f ====="
+  python3 "$f"
+  echo
+done
+[จบโค้ด / แผนภาพ]
+
+----------------------------------------------------------------
+
+16. สรุปสุดท้ายแบบจำง่าย
+------------------------
+
+[โค้ด / แผนภาพ : text]
+simple          = ทำทีละงาน ช้าที่สุด แต่อ่านง่ายสุด
+threading       = หลาย thread เหมาะกับงานรอ / I/O
+multiprocessing = หลาย process เหมาะกับงาน CPU หนัก
+asyncio         = thread เดียว + event loop เหมาะกับงานรอจำนวนมาก
+[จบโค้ด / แผนภาพ]
+
+สำหรับ Week2 ให้จำหัวใจของ asyncio แบบนี้ค่ะ:
+
+[โค้ด / แผนภาพ : text]
+async def สร้าง coroutine
+await คือจุดที่ยอมให้ event loop ไปทำงานอื่น
+create_task ทำให้งานเริ่ม concurrent
+gather ใช้รอหลาย task พร้อมกัน
+asyncio.run ใช้เปิด event loop
+[จบโค้ด / แผนภาพ]
+
+ถ้าใบเข้าใจ 5 บรรทัดนี้ ใบจะอ่านไฟล์ asyncio01.py ถึง asyncio10.py และทำ Lab ร้านอาหาร 4
+ไฟล์ต่อได้แล้วค่ะ
