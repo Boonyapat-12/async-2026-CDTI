@@ -9,6 +9,8 @@ OPEN BOOK — Asynchronous Programming
 เอกสารฝึก ไม่ใช่ข้อสอบจริง และไม่มีข้อมูลยืนยันขอบเขตข้อสอบของอาจารย์
 
 เริ่มอ่าน: 02 -> 03 -> 04 -> 05 -> 06 -> 07 -> 08 -> 09 -> 10 -> 11
+เปิดในห้องสอบ: 17_exam_navigation.txt
+กา: 14 / หาบัค: 15 / เขียนโค้ด: 16
 ค้นเร็ว: 01_quick_index.txt
 รวมเล่ม: 12_openbook_all.txt
 ข้อสอบฝึก 30 ข้อพร้อมเฉลย: 13_practice_exam_with_answers.txt
@@ -137,7 +139,6 @@ Week10/web_dashboard.py : redis_listener, lifespan, get, websocket_endpoint, __i
 10. คำว่า parallel ในคอมเมนต์บางตัวอย่างหมายถึง concurrent ไม่ใช่หลาย core
 
 
-
 [FILE 01_quick_index.txt]
 OPEN BOOK — ดัชนีค้นคำตอบเร็ว
 ========================================================================
@@ -182,7 +183,6 @@ OPEN BOOK — ดัชนีค้นคำตอบเร็ว
 [QUEUE-03] Bounded queue
 [QUEUE-04] หยุด worker ด้วย sentinel
 [QUEUE-05] แก้คิวค้าง
-[0] [1] [2] [3] [4] [5]
 
 09_redis.txt
 [REDIS-01] พื้นฐาน
@@ -206,6 +206,59 @@ OPEN BOOK — ดัชนีค้นคำตอบเร็ว
 [RECIPE-05] โจทย์เลือกตอบสองข้อ
 [RECIPE-06] คำสั่งอ่านและค้นจาก root ของ repo
 
+14_multiple_choice_quick_reference.txt
+[MC-ASYNC] synchronous / concurrent / parallel / CPU / I/O
+[MC-CORO] coroutine / await / event loop
+[MC-TASK] done / result / exception / cancel
+[MC-GATHER] gather / ลำดับ / exception
+[MC-WAIT] wait / FIRST_COMPLETED / timeout
+[MC-LOCK] shared state / race condition / critical section
+[MC-QUEUE] FIFO / maxsize / task_done / join
+[MC-HTTP] HTTPX / FastAPI / WebSocket
+[MC-REDIS] Redis / PubSub / Streams / XACK
+[MC-TANK] Tank Battle ตามโค้ด repo
+[MC-TIME] สูตรประมาณเวลาและอ่านลำดับ
+
+15_bug_finder.txt
+[BUG-AWAIT] coroutine was never awaited / งานไม่ทำ
+[BUG-BLOCK] งานอื่นไม่เดิน / timer ช้า
+[BUG-RESULT] InvalidStateError / Result is not set
+[BUG-WAIT] Passing coroutines is forbidden / TypeError
+[BUG-PENDING] Task was destroyed / งานเบื้องหลังไม่จบ
+[BUG-LOCK-SCOPE] count/stock/coupon ผิดแม้มี lock
+[BUG-LOCK-INSTANCE] ใส่ Lock แล้วยังแจกซ้ำ
+[BUG-JOIN] queue.join() ค้าง
+[BUG-SENTINEL] worker บางตัวรอ get ไม่ยอมจบ
+[BUG-QUEUE-API] QueueFull / QueueEmpty
+[BUG-CANCEL] CancelledError หลุด despite except Exception
+[BUG-DEADLOCK] lock ค้าง / task ขอ lock เดิมซ้ำ
+[BUG-HTTP] TypeError จาก await response.json()
+[BUG-ORDER] ผล gather ดูไม่ตรงลำดับเสร็จ
+[BUG-ACK] Stream pending เพิ่ม / worker ล่มแล้วงานไม่กลับ
+[BUG-PUBSUB] offline กลับมาแล้ว message หาย
+[BUG-TRACE] ไล่บัคบนกระดาษก่อนแก้
+
+16_code_templates.txt
+[TPL-GATHER] รันหลายงานและรวมผลตาม input
+[TPL-WAIT] รอชุดงานแรกที่จบและหยุดที่เหลือ
+[TPL-TIMEOUT] รอหนึ่งงานพร้อม timeout
+[TPL-ERRORS] เก็บผลสำเร็จและ exception ของทุกงาน
+[TPL-CANCEL] ยกเลิก background task พร้อม cleanup
+[TPL-LOCK] อัปเดต shared state อย่างถูกต้อง
+[TPL-QUEUE] Producer–Consumer หลาย worker พร้อม shutdown
+[TPL-THREAD] ย้าย blocking I/O ออกจาก loop
+[TPL-HTTP] เรียก HTTP หลายรายการและตรวจ error
+[TPL-PUBSUB] รับ Pub/Sub ก่อนส่งข้อความ demo
+[TPL-STREAM] เพิ่ม Stream event แล้วรับและ ACK ใน group
+[TPL-API] FastAPI และ WebSocket echo
+[TPL-CHECK] ตรวจคำตอบก่อนส่ง
+
+17_exam_navigation.txt
+[NAV-START] เริ่มตรงนี้
+[NAV-CHOICE] คำในตัวเลือก -> ค้นในไฟล์ 14
+[NAV-BUG] อาการ -> ค้นในไฟล์ 15
+[NAV-CODE] Requirement -> ค้นในไฟล์ 16
+[NAV-SEARCH] ค้นโดยไม่อ่านทั้งเล่ม
 
 
 [FILE 02_async_fundamentals.txt]
@@ -17471,3 +17524,654 @@ Select-String -Path .\00-FinalExam\13_practice_exam_with_answers.txt -SimpleMatc
 Linux/macOS:
 less 00-FinalExam/12_openbook_all.txt
 ใน less พิมพ์ /[LOCK-02] แล้ว Enter; n ไปผลถัดไป; q ออก
+
+========================================================================
+ภาคใช้ในห้องสอบ — กา / หาบัค / เขียนโค้ด
+
+[FILE 17_exam_navigation.txt]
+เปิดค้างในห้องสอบ — ทางลัดทั้ง 3 พาร์ท
+========================================================================
+
+[NAV-START] เริ่มตรงนี้
+พาร์ท 1 กา -> เปิด 14_multiple_choice_quick_reference.txt
+พาร์ท 2 หาบัค -> เปิด 15_bug_finder.txt
+พาร์ท 3 เขียน -> เปิด 16_code_templates.txt
+ต้องอ่านเหตุผลละเอียด -> 01_quick_index.txt แล้วไปบท 02–10
+ฝึกก่อนสอบ -> 13_practice_exam_with_answers.txt
+
+[NAV-CHOICE] คำในตัวเลือก -> ค้นในไฟล์ 14
+concurrent/parallel/I/O/CPU -> [MC-ASYNC]
+coroutine/await/event loop -> [MC-CORO]
+result/done/cancel -> [MC-TASK]
+ลำดับผล gather/error -> [MC-GATHER]
+FIRST_COMPLETED/pending/timeout -> [MC-WAIT]
+shared state/lock/process -> [MC-LOCK]
+FIFO/queue/join/maxsize -> [MC-QUEUE]
+HTTP/FastAPI/WebSocket -> [MC-HTTP]
+Redis/Stream/ACK/group -> [MC-REDIS]
+game:commands/game:state/tick -> [MC-TANK]
+เวลารวม/ลำดับ await -> [MC-TIME]
+
+[NAV-BUG] อาการ -> ค้นในไฟล์ 15
+ไม่ทำงาน/never awaited -> [BUG-AWAIT]
+งานอื่นไม่เดิน -> [BUG-BLOCK]
+InvalidStateError -> [BUG-RESULT]
+wait TypeError -> [BUG-WAIT]
+task ค้างหลัง cancel -> [BUG-PENDING]
+count/coupon ผิด -> [BUG-LOCK-SCOPE], [BUG-LOCK-INSTANCE]
+join ค้าง -> [BUG-JOIN]; get ไม่จบ -> [BUG-SENTINEL]
+QueueFull/QueueEmpty -> [BUG-QUEUE-API]
+CancelledError -> [BUG-CANCEL]; lock ค้าง -> [BUG-DEADLOCK]
+await json TypeError -> [BUG-HTTP]
+gather order -> [BUG-ORDER]
+pending Redis -> [BUG-ACK]; offline หาย -> [BUG-PUBSUB]
+
+[NAV-CODE] Requirement -> ค้นในไฟล์ 16
+ต้องได้ทุกผล -> [TPL-GATHER]
+เอางานแรกที่จบ -> [TPL-WAIT]
+กำหนดเวลารอ -> [TPL-TIMEOUT]
+บางงาน fail แต่ต้องได้ผลอื่น -> [TPL-ERRORS]
+หยุด background worker -> [TPL-CANCEL]
+แก้ข้อมูลร่วม -> [TPL-LOCK]
+ผลิต/รับงาน/หลาย worker -> [TPL-QUEUE]
+blocking library -> [TPL-THREAD]
+HTTP หลาย URL -> [TPL-HTTP]
+live broadcast -> [TPL-PUBSUB]
+เก็บ event/ACK -> [TPL-STREAM]
+API/WebSocket -> [TPL-API]
+ก่อนส่ง -> [TPL-CHECK]
+
+[NAV-SEARCH] ค้นโดยไม่อ่านทั้งเล่ม
+คำสั่ง PowerShell จาก root ของ repo:
+Select-String -Path .\00-FinalExam\15_bug_finder.txt -SimpleMatch '[BUG-JOIN]' -Context 0,18
+Select-String -Path .\00-FinalExam\16_code_templates.txt -SimpleMatch '[TPL-LOCK]' -Context 0,26
+Get-Content -Raw -Encoding utf8 .\00-FinalExam\17_exam_navigation.txt
+Linux/macOS: less 00-FinalExam/16_code_templates.txt
+ใน less ค้น literal โดยพิมพ์ / ตามด้วย \[TPL-LOCK\] แล้ว Enter
+กด n ไปผลถัดไป, q ออก; Ctrl+F ใน editor ค้นรหัสได้โดยตรง
+
+ใช้ข้อมูล/ชื่อ function/output ตามโจทย์จริง; template เป็นจุดเริ่มปรับคำตอบ
+
+
+[FILE 14_multiple_choice_quick_reference.txt]
+พาร์ท 1 — กา: กฎตัดสินตัวเลือกเร็ว
+========================================================================
+
+วิธีใช้: ค้น MC ตามคำในโจทย์ ตรวจเงื่อนไขก่อนเลือกคำตอบสองข้อ
+สำหรับ Python 3.12 และ event loop มาตรฐาน; ไม่มี eager task factory
+คำว่า "เสมอ / ทุกครั้ง / ทันที / ทุก process / รับประกัน" ต้องตรวจเป็นพิเศษ
+
+[MC-ASYNC] synchronous / concurrent / parallel / CPU / I/O
+ถูก: Concurrent คือหลายงานมีช่วงชีวิตทับซ้อน อาจสลับบน thread เดียว
+ถูก: Parallel คือทำพร้อมกันจริง เช่นหลาย core
+ผิด: async def ทำให้ CPU loop parallel อัตโนมัติ
+ผิด: I/O ทุกตัวไม่บล็อกเพียงเพราะอยู่ใน coroutine
+เทียบ: time.sleep บล็อก thread; await asyncio.sleep พักงานและให้ loop เดิน
+ข้อยกเว้น: FastAPI path operation def ถูกจัดเข้ thread pool ไม่เหมือน helper
+def ที่ถูกเรียกตรงจาก async handler
+
+[MC-CORO] coroutine / await / event loop
+f เป็น coroutine function; f() เป็น coroutine object; ยังไม่ schedule เอง
+await f() รันและรอ; create_task(f()) schedule แล้วคืน Task
+await ไม่จำเป็นต้องพักทุกครั้ง ถ้า awaitable พร้อมแล้วอาจทำต่อทันที
+run(main()) ใช้ในสคริปต์; ห้ามซ้อนบน thread ที่มี running event loop
+Task/Future เป็น awaitable; list/dict/int ปกติไม่ใช่ awaitable
+
+[MC-TASK] done / result / exception / cancel
+done() เป็น True เมื่อจบ รวมการยกเลิกที่เสร็จแล้ว
+result() ก่อนจบ -> InvalidStateError; หลัง fail -> raise exception เดิม
+result()/exception() ของ cancelled task -> CancelledError
+cancel() ขอให้ยกเลิก ไม่ใช่ kill ทันที; ต้องรอ cleanup
+CancelledError ใน Python 3.12 เป็น BaseException ไม่ใช่ Exception
+
+[MC-GATHER] gather / ลำดับ / exception
+ผลของ gather เรียง input แม้งานเสร็จคนละลำดับ
+ค่าเริ่มต้นส่ง exception แรกให้ผู้ await ไม่ cancel พี่น้องเพราะ error นี้เอง
+return_exceptions=True คืน error ใน list ต้องตรวจ ไม่ใช่ลบ error
+gather ถูก cancel -> งานที่ยังไม่จบภายในถูก cancel
+TaskGroup ใช้การจัดการ failure ต่างจาก gather; อย่ารวมเป็นกฎเดียวกัน
+
+[MC-WAIT] wait / FIRST_COMPLETED / timeout
+wait คืน (done, pending) เป็น set ไม่มีลำดับ input
+Python 3.12 ต้องส่ง Task/Future ไม่ใช่ raw coroutine
+FIRST_COMPLETED อาจได้ done หลายงาน ณ เวลาที่กลับมาทำต่อ
+wait timeout ไม่ cancel pending และไม่ raise TimeoutError เพียงเพราะ timeout
+wait_for timeout ปกติ cancel งาน รอการยกเลิก แล้ว raise TimeoutError
+เวลา wait_for อาจมากกว่า timeout; remote side effect ไม่ rollback ให้อัตโนมัติ
+
+[MC-LOCK] shared state / race condition / critical section
+thread เดียวเกิด race ได้ ถ้าพักระหว่างอ่านและเขียนข้อมูลร่วม
+ต้องล็อกทั้งชุดตรวจและเปลี่ยน ไม่ใช่ล็อกแค่ assignment หลังอ่านค่าเก่า
+ทุกผู้แก้ state ต้องใช้ lock ตัวเดียวกัน; lock แยกแต่ละ request ไม่ช่วยกัน
+asyncio.Lock จำกัด task ภายใน loop ไม่ประสานหลาย worker process
+acquire ต้อง await; release ไม่ await; async with ช่วย release ตอนออก
+Lock ไม่รับประกันไม่มี deadlock และไม่รับประกันคำขอ network สำเร็จ
+
+[MC-QUEUE] FIFO / maxsize / task_done / join
+FIFO เป็นลำดับ dequeue ไม่ใช่ลำดับเสร็จของหลาย consumer
+put/get ต้อง await; task_done/put_nowait/get_nowait ไม่ await
+get นำ item ออก แต่ไม่ลด unfinished count; task_done ต่างหากที่ลด
+empty=True อาจยังมีงานที่ worker ถืออยู่; join จึงยังรอได้
+maxsize จำกัด item ในคิว ไม่ใช่จำนวน worker; <=0 คือไม่จำกัด
+join ไม่หยุด worker ไม่ยืนยันว่า business operation สำเร็จ
+sentinel เป็น item ที่ put จึงมี task_done เช่นเดียวกัน
+
+[MC-HTTP] HTTPX / FastAPI / WebSocket
+await client.get/post; response.json และ raise_for_status ไม่ await
+HTTP 200 อาจมี application status ที่ไม่สำเร็จ ต้องอ่าน body
+WebSocket เปิด connection เพื่อหลายข้อความ ไม่ให้ replay Redis อัตโนมัติ
+connection ต้อง accept และต้องจัดการ disconnect
+
+[MC-REDIS] Redis / PubSub / Streams / XACK
+Pub/Sub live broadcast ไม่มี history/replay ให้ offline subscriber
+Stream เก็บ log แต่ความทนทานขึ้นกับ retention/persistence/configuration
+group เดียวแบ่งงาน; ต่าง group มีตำแหน่งอ่านแยกกัน
+XREADGROUP ใช้ > สำหรับงานใหม่ ไม่ใช่ pending recovery ทั้งหมด
+XACK ล้าง pending ของ group ไม่ใช่ลบ entry จาก Stream
+id=$ ตอนสร้าง group เริ่มท้ายปัจจุบัน; id=0 ใช้อ่านของเก่า
+at-least-once ต้องมีกลไก recovery; อาจทำซ้ำ ต้อง idempotency
+INCR atomic; GET แล้ว SET สองคำสั่งไม่ได้ atomic อัตโนมัติ
+
+[MC-TANK] Tank Battle ตามโค้ด repo
+game:commands = action เข้า server; game:state = state ออกจาก server
+server คุมกฎ/physics; Redis เป็นตัวกลาง; browser รับผ่าน WebSocket
+server.py ใช้ TICK_RATE=0.2 หรือเป้าหมาย 5 tick/s ก่อน overhead
+tank.py ใช้ Redis synchronous ไม่ใช่ว่าทั้งระบบเป็น coroutine
+cooldown เป็นข้อจำกัดจังหวะ action ไม่ใช่ mutual exclusion
+
+[MC-TIME] สูตรประมาณเวลาและอ่านลำดับ
+await A(); await B() งานรออิสระ -> ประมาณ tA+tB
+สร้าง task ทั้งสองก่อนแล้ว await tA; await tB -> ไม่กลายเป็น sequential
+gather(A(),B()) -> ประมาณ max(tA,tB) เมื่อไม่มีคอขวด/dependency
+Lock ครอบ await ยาวของทุกงาน -> ช่วงนั้นเรียงกัน
+print ก่อน/หลัง await ต้องไล่ scheduling; ถ้าไม่แน่นอนให้ระบุสิ่งที่รับประกัน
+
+อ่านละเอียด: 03, 04, 07, 08, 09; ฝึกเลือกสองข้อ: 13
+
+
+[FILE 15_bug_finder.txt]
+พาร์ท 2 — หาบัค: อาการ → สาเหตุ → โค้ดแก้
+========================================================================
+
+ค้นจากอาการหรือรหัส BUG; ตัวอย่างในบัตรเป็น snippet ไม่ใช่โปรแกรมเต็ม
+ลำดับตรวจ: entry point -> schedule -> blocking -> shared state -> cleanup
+
+[BUG-AWAIT] coroutine was never awaited / งานไม่ทำ
+สาเหตุ: เรียก coroutine แต่ไม่ await หรือ schedule
+โค้ดเสี่ยง:
+fetch()
+แก้เป็น:
+result = await fetch()
+ข้อควรตรวจ: คำสั่งแก้ต้องอยู่ใน async def; หรือใช้ asyncio.run(main()) ในสคริปต์
+------------------------------------------------------------------------
+
+[BUG-BLOCK] งานอื่นไม่เดิน / timer ช้า
+สาเหตุ: blocking call บน loop thread
+โค้ดเสี่ยง:
+time.sleep(1)
+แก้เป็น:
+await asyncio.sleep(1)
+ข้อควรตรวจ: blocking I/O library ใช้ await asyncio.to_thread(fn, args); ไม่ได้หยุด thread ด้วย cancel ทันที
+------------------------------------------------------------------------
+
+[BUG-RESULT] InvalidStateError / Result is not set
+สาเหตุ: อ่าน result ก่อน task จบ
+โค้ดเสี่ยง:
+value = task.result()
+แก้เป็น:
+value = await task
+ข้อควรตรวจ: await ส่ง exception ของ task กลับมาด้วย ต้องจับตามโจทย์
+------------------------------------------------------------------------
+
+[BUG-WAIT] Passing coroutines is forbidden / TypeError
+สาเหตุ: ส่ง coroutine ให้ wait ใน Python 3.12
+โค้ดเสี่ยง:
+done, pending = await asyncio.wait([job()])
+แก้เป็น:
+task = asyncio.create_task(job())
+done, pending = await asyncio.wait([task])
+ข้อควรตรวจ: ไม่สร้าง coroutine แล้วทิ้งค้าง; wait ไม่ cancel pending เอง
+------------------------------------------------------------------------
+
+[BUG-PENDING] Task was destroyed / งานเบื้องหลังไม่จบ
+สาเหตุ: cancel แล้วไม่รอ cleanup
+โค้ดเสี่ยง:
+for task in pending:
+    task.cancel()
+แก้เป็น:
+for task in pending:
+    task.cancel()
+await asyncio.gather(*pending, return_exceptions=True)
+ข้อควรตรวจ: ถ้าไม่ต้องการ cancel ให้ await งานต่อแทน; อย่ายกเลิกงานที่โจทย์ต้องการผล
+------------------------------------------------------------------------
+
+[BUG-LOCK-SCOPE] count/stock/coupon ผิดแม้มี lock
+สาเหตุ: อ่านค่าเก่าหรือเช็คสิทธิ์นอก critical section
+โค้ดเสี่ยง:
+old = count
+async with lock:
+    count = old + 1
+แก้เป็น:
+async with lock:
+    old = count
+    count = old + 1
+ข้อควรตรวจ: ล็อกทั้ง check + update และใช้ lock ร่วมกันทุกเส้นทาง
+------------------------------------------------------------------------
+
+[BUG-LOCK-INSTANCE] ใส่ Lock แล้วยังแจกซ้ำ
+สาเหตุ: แต่ละ worker สร้าง lock คนละตัว
+โค้ดเสี่ยง:
+async def worker():
+    lock = asyncio.Lock()
+แก้เป็น:
+lock = asyncio.Lock()  # สร้างร่วมภายใน main
+# ส่ง lock เดียวเข้า worker ทุกตัว
+ข้อควรตรวจ: snippet แสดงตำแหน่งสร้าง ไม่ใช่โปรแกรมเต็ม; หลาย process ยังต้องใช้กลไกอื่น
+------------------------------------------------------------------------
+
+[BUG-JOIN] queue.join() ค้าง
+สาเหตุ: มี unfinished item ไม่ได้รับ task_done หรือ worker ตาย
+โค้ดเสี่ยง:
+item = await q.get()
+await process(item)
+แก้เป็น:
+item = await q.get()
+try:
+    await process(item)
+finally:
+    q.task_done()
+ข้อควรตรวจ: finally ยืนยันการจัดการ ไม่ใช่ความสำเร็จ; ถ้า worker fail ต้องกำหนดหยุด/ระบาย/ retry งานที่เหลือ
+------------------------------------------------------------------------
+
+[BUG-SENTINEL] worker บางตัวรอ get ไม่ยอมจบ
+สาเหตุ: sentinel ไม่ครบ worker หรือไม่มี shutdown path
+โค้ดเสี่ยง:
+await q.put(None)  # แต่มี 3 worker
+แก้เป็น:
+for _ in workers:
+    await q.put(None)
+await q.join()
+await asyncio.gather(*workers)
+ข้อควรตรวจ: consumer ต้องหยุดเมื่อเจอ None และ task_done ทั้งงานและ sentinel; payload ห้ามเป็น None
+------------------------------------------------------------------------
+
+[BUG-QUEUE-API] QueueFull / QueueEmpty
+สาเหตุ: ใช้ nowait แล้วไม่ได้รับมือสถานะทันที
+โค้ดเสี่ยง:
+item = q.get_nowait()
+แก้เป็น:
+item = await q.get()
+ข้อควรตรวจ: ใช้ await ถ้าต้องการรอ; ถ้าต้องไม่รอ ให้จับ asyncio.QueueEmpty/QueueFull
+------------------------------------------------------------------------
+
+[BUG-CANCEL] CancelledError หลุด despite except Exception
+สาเหตุ: จับผิดระดับ exception
+โค้ดเสี่ยง:
+except Exception:
+    print("cancelled")
+แก้เป็น:
+except asyncio.CancelledError:
+    # cleanup ที่จำเป็น
+    raise
+ข้อควรตรวจ: ใช้ finally สำหรับ resource; การ raise ต่อรักษา cancellation semantics
+------------------------------------------------------------------------
+
+[BUG-DEADLOCK] lock ค้าง / task ขอ lock เดิมซ้ำ
+สาเหตุ: ถือ lock แล้ว await งานที่ต้องขอ lock เดียว
+โค้ดเสี่ยง:
+async with lock:
+    await update_with_same_lock()
+แก้เป็น:
+async with lock:
+    update_without_reacquiring_lock()
+ข้อควรตรวจ: asyncio.Lock ไม่ reentrant; แยก helper ที่รับผิดชอบ locking ให้ชัด
+------------------------------------------------------------------------
+
+[BUG-HTTP] TypeError จาก await response.json()
+สาเหตุ: await สิ่งที่ไม่ใช่ awaitable
+โค้ดเสี่ยง:
+data = await response.json()
+แก้เป็น:
+data = response.json()
+ข้อควรตรวจ: response = await client.get(url); response.raise_for_status() ก่อนอ่าน body
+------------------------------------------------------------------------
+
+[BUG-ORDER] ผล gather ดูไม่ตรงลำดับเสร็จ
+สาเหตุ: เข้าใจ gather คืนลำดับเสร็จ
+โค้ดเสี่ยง:
+results = await asyncio.gather(a(), b())
+แก้เป็น:
+a_result, b_result = await asyncio.gather(a(), b())
+ข้อควรตรวจ: นี่ไม่ใช่บัคใน gather; ถ้าต้องการลำดับเสร็จใช้ as_completed ตาม requirement
+------------------------------------------------------------------------
+
+[BUG-ACK] Stream pending เพิ่ม / worker ล่มแล้วงานไม่กลับ
+สาเหตุ: ไม่ ack หรือไม่มี reclaim
+โค้ดเสี่ยง:
+entries = await r.xreadgroup(group, consumer, {stream: ">"})
+แก้เป็น:
+await process(fields)
+await r.xack(stream, group, message_id)
+ข้อควรตรวจ: ack หลังจัดการสำเร็จ ไม่ใช่ก่อน; ตัวอย่างเป็นส่วนใน loop; recovery ต้องออกแบบแยก
+------------------------------------------------------------------------
+
+[BUG-PUBSUB] offline กลับมาแล้ว message หาย
+สาเหตุ: ใช้ Pub/Sub แต่ต้องการ history
+โค้ดเสี่ยง:
+await r.publish(channel, payload)
+แก้เป็น:
+ใช้ Stream + XADD + อ่านต่อจาก ID หรือ consumer group ตาม requirement
+ข้อควรตรวจ: ไม่ใช่เปลี่ยนบรรทัดเดียว ต้องแก้ producer/consumer และ retention
+------------------------------------------------------------------------
+
+[BUG-TRACE] ไล่บัคบนกระดาษก่อนแก้
+1. จดว่า coroutine ใดถูก schedule จริง ไม่ใช่ดูแต่ชื่อ async def
+2. ติดตาม shared state และจุดที่ค่าอาจเก่าหลัง await
+3. จดผลสำเร็จ/exception/cancellation แยกกัน
+4. งานที่ไม่จบยังมีใครถือ reference หรือรออยู่ไหม?
+5. resource/connection/task_done/lock ถูกคืนในทุกเส้นทางไหม?
+6. ดู requirement ก่อนแก้: ต้องการทุกผลหรือผู้ชนะ ต้อง retry หรือยกเลิก?
+
+ตัวอย่าง timeline: count=0, A/B อ่านแล้ว await ก่อนเขียน
+A อ่าน 0 -> พัก; B อ่าน 0 -> พัก; A เขียน 1; B เขียน 1
+ผลผิด 1 เพราะ stale read; lock ครอบทั้งชุดได้ 2
+โค้ดเต็มที่ทดลองได้: [TPL-LOCK] ใน 16_code_templates.txt
+
+
+[FILE 16_code_templates.txt]
+พาร์ท 3 — เขียนโค้ด: แม่แบบครบพร้อมปรับ
+========================================================================
+
+ใช้ Python 3.12; ทุก CODE ด้านล่างเป็นโปรแกรมครบในตัวเมื่อมี dependency
+คัดลอกหนึ่ง CODE เป็น answer.py แล้ว python answer.py
+FastAPI template ใช้ชื่อไฟล์และคำสั่ง uvicorn ที่กำกับ
+อย่าคัดลอกทุก template มารวมกันโดยไม่แก้ entry point
+แก้ input/ชื่อฟังก์ชัน/ชนิดข้อมูลให้ตรงโจทย์ เก็บ comment ไทยเฉพาะที่ช่วยอธิบาย
+
+[TPL-GATHER] รันหลายงานและรวมผลตาม input
+ใช้เมื่อ: ต้องได้ทุกผล
+เปลี่ยนตรงนี้: jobs, delay และรูปแบบ return
+[CODE TPL-GATHER]
+import asyncio  # รันงานที่รอได้
+async def job(value):
+    await asyncio.sleep(0.01)  # แทนการรอ I/O
+    return value * 2  # เปลี่ยนสูตรตามโจทย์
+async def main():
+    jobs = [1, 2, 3]  # input ของโจทย์
+    results = await asyncio.gather(*(job(x) for x in jobs))
+    print(results)  # เรียงตาม input
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: [2, 4, 6]
+
+[TPL-WAIT] รอชุดงานแรกที่จบและหยุดที่เหลือ
+ใช้เมื่อ: โจทย์ให้เลือกผู้เสร็จก่อน
+เปลี่ยนตรงนี้: tasks และวิธีเลือกจาก done ถ้ามีหลายตัว
+[CODE TPL-WAIT]
+import asyncio  # สร้าง task ที่แข่งกัน
+async def job(name, delay):
+    await asyncio.sleep(delay)
+    return name
+async def main():
+    tasks = {asyncio.create_task(job("A", 0.01)),
+             asyncio.create_task(job("B", 0.5))}
+    try:
+        done, pending = await asyncio.wait(tasks,
+            return_when=asyncio.FIRST_COMPLETED)
+        print(sorted(t.result() for t in done))  # ตรวจทุก task ที่จบ
+    finally:
+        for task in tasks:  # รวม cleanup แม้ result() เกิด exception
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: ['A']
+
+[TPL-TIMEOUT] รอหนึ่งงานพร้อม timeout
+ใช้เมื่อ: โจทย์กำหนดเวลารอสูงสุด
+เปลี่ยนตรงนี้: timeout และชนิด exception ที่ตอบ
+[CODE TPL-TIMEOUT]
+import asyncio  # ใช้ wait_for
+async def job():
+    await asyncio.sleep(0.5)  # จำลองงานช้า
+    return "ok"
+async def main():
+    try:
+        value = await asyncio.wait_for(job(), timeout=0.01)
+        print(value)
+    except TimeoutError:
+        print("timeout")  # ผู้รอตัดสินใจเมื่อเกินเวลา
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: timeout
+
+[TPL-ERRORS] เก็บผลสำเร็จและ exception ของทุกงาน
+ใช้เมื่อ: บางงาน fail แต่ยังต้องตรวจผลอื่น
+เปลี่ยนตรงนี้: ชนิด exception และ output format
+[CODE TPL-ERRORS]
+import asyncio  # รวมผลพร้อม exception
+async def job(value):
+    await asyncio.sleep(0)
+    if value == 0:
+        raise ValueError("zero")
+    return 10 // value
+async def main():
+    results = await asyncio.gather(job(2), job(0), return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):  # รวมกรณี cancellation ด้วย
+            print(type(result).__name__)
+        else:
+            print(result)
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: 5
+ValueError
+
+[TPL-CANCEL] ยกเลิก background task พร้อม cleanup
+ใช้เมื่อ: ต้องหยุด worker ที่รอไม่สิ้นสุด
+เปลี่ยนตรงนี้: worker และ resource ใน finally
+[CODE TPL-CANCEL]
+import asyncio  # ขอและรอ cancellation
+async def worker(started):
+    started.set()  # ยืนยันว่าเข้า worker แล้ว
+    try:
+        await asyncio.sleep(60)
+    finally:
+        print("cleanup")  # คืน resource ตามโจทย์
+async def main():
+    started = asyncio.Event()
+    task = asyncio.create_task(worker(started))
+    await started.wait()  # ไม่ cancel ก่อน worker เริ่ม
+    task.cancel()
+    try:
+        await task  # รอ cleanup
+    except asyncio.CancelledError:
+        print("cancelled")
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: cleanup
+cancelled
+
+[TPL-LOCK] อัปเดต shared state อย่างถูกต้อง
+ใช้เมื่อ: หลาย task แก้ค่าร่วมใน loop เดียว
+เปลี่ยนตรงนี้: จำนวน workers, state และ critical section
+[CODE TPL-LOCK]
+import asyncio  # lock ร่วมกัน
+async def main():
+    state = {"count": 0}
+    lock = asyncio.Lock()  # สร้างหนึ่งตัวร่วม
+    async def worker():
+        async with lock:  # ครอบทั้ง read-modify-write
+            old = state["count"]
+            await asyncio.sleep(0)  # แสดงจุดที่งานอื่นอาจแทรก
+            state["count"] = old + 1
+    await asyncio.gather(*(worker() for _ in range(3)))
+    print(state["count"])
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: 3
+
+[TPL-QUEUE] Producer–Consumer หลาย worker พร้อม shutdown
+ใช้เมื่อ: งานในคิวและต้องรอทุกชิ้น
+เปลี่ยนตรงนี้: จำนวน worker, maxsize, input และ process
+[CODE TPL-QUEUE]
+import asyncio  # queue ใน loop เดียว
+async def main():
+    queue = asyncio.Queue(maxsize=2)
+    results, errors = [], []  # ระบุเส้นทาง fail โดยไม่ปล่อย worker ตาย
+    async def worker():
+        while True:
+            item = await queue.get()
+            try:
+                if item is None:  # input ปกติห้ามเป็น None
+                    return
+                try:
+                    await asyncio.sleep(0)
+                    results.append(item * 2)
+                except Exception as error:
+                    errors.append((item, type(error).__name__))
+            finally:
+                queue.task_done()  # รวม sentinel และงานล้มเหลวที่จัดการแล้ว
+    workers = [asyncio.create_task(worker()) for _ in range(2)]
+    for item in [1, 2, 3]:
+        await queue.put(item)
+    for _ in workers:
+        await queue.put(None)
+    await queue.join()
+    await asyncio.gather(*workers)
+    print(sorted(results), errors)
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: [2, 4, 6] []
+ข้อจำกัด TPL-QUEUE: บันทึก error ไม่ retry; ถ้า main ถูก cancel ต้องออกแบบ shutdown เพิ่ม
+
+[TPL-THREAD] ย้าย blocking I/O ออกจาก loop
+ใช้เมื่อ: มีไลบรารี synchronous สำหรับ I/O
+เปลี่ยนตรงนี้: blocking function และ args
+[CODE TPL-THREAD]
+import asyncio  # offload ไป thread
+import time  # จำลอง blocking I/O
+def read_sync():
+    time.sleep(0.01)  # บล็อก worker thread ไม่ใช่ loop thread
+    return "data"
+async def main():
+    print(await asyncio.to_thread(read_sync))
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: data
+ข้อจำกัด TPL-THREAD: เหมาะ blocking I/O; cancellation ไม่หยุด thread ที่รันอยู่ทันที
+
+[TPL-HTTP] เรียก HTTP หลายรายการและตรวจ error
+ใช้เมื่อ: โจทย์มี API หลาย URL
+เปลี่ยนตรงนี้: urls, timeout, field ที่อ่าน
+[CODE TPL-HTTP]
+import asyncio  # รัน request ร่วมกัน
+import httpx  # ต้องมี HTTPX และบริการปลายทาง
+async def fetch(client, url):
+    response = await client.get(url)
+    response.raise_for_status()
+    return response.json()
+async def main():
+    urls = ["http://127.0.0.1:8000/items/1", "http://127.0.0.1:8000/items/2"]
+    async with httpx.AsyncClient(timeout=5) as client:
+        results = await asyncio.gather(*(fetch(client, u) for u in urls),
+                                       return_exceptions=True)
+    for result in results:
+        print(type(result).__name__ if isinstance(result, BaseException) else result)
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: ขึ้นกับบริการที่เตรียมไว้; ตรวจ syntax เท่านั้น
+ผลเชิงพฤติกรรม TPL-HTTP: JSON หรือชื่อ exception ตามแต่ละ URL ตามลำดับ input
+
+[TPL-PUBSUB] รับ Pub/Sub ก่อนส่งข้อความ demo
+ใช้เมื่อ: โจทย์ live broadcast
+เปลี่ยนตรงนี้: channel และ payload; มี Redis localhost:6379
+[CODE TPL-PUBSUB]
+import asyncio  # รัน Redis async client
+import redis.asyncio as redis  # ต้องมี redis-py
+async def main():
+    r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+    try:
+        async with r.pubsub() as ps:
+            await ps.subscribe("exam:live")
+            async for message in ps.listen():  # รอ subscription acknowledgement
+                if message["type"] == "subscribe":
+                    break
+            await r.publish("exam:live", "hello")  # เขียน channel demo
+            async def receive():
+                async for message in ps.listen():
+                    if message["type"] == "message":
+                        return message["data"]
+            print(await asyncio.wait_for(receive(), timeout=2))
+    finally:
+        await r.aclose()
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: ขึ้นกับบริการที่เตรียมไว้; ตรวจ syntax เท่านั้น
+ผลเมื่อบริการพร้อมและไม่มี publisher อื่นใช้ channel demo: hello; offline ไม่มี replay
+
+[TPL-STREAM] เพิ่ม Stream event แล้วรับและ ACK ใน group
+ใช้เมื่อ: โจทย์งานที่ต้องติดตาม pending
+เปลี่ยนตรงนี้: stream/group/consumer; มี Redis localhost:6379
+[CODE TPL-STREAM]
+import asyncio  # รัน coroutine
+from uuid import uuid4  # แยก key demo ไม่ชนข้อมูลเก่า
+import redis.asyncio as redis
+async def main():
+    r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+    stream, group = "exam:events:" + uuid4().hex, "workers"
+    try:
+        await r.xadd(stream, {"value": "7"})  # เขียน demo ลง Stream
+        await r.xgroup_create(stream, group, id="0")  # อ่าน entry ที่มีอยู่
+        entries = await r.xreadgroup(group, "worker1", {stream: ">"}, count=1, block=1000)
+        for _, messages in entries:
+            for message_id, fields in messages:
+                print(int(fields["value"]) * 2)  # จัดการก่อน ACK
+                await r.xack(stream, group, message_id)
+        await r.expire(stream, 60)  # key demo หมดอายุภายหลัง
+    finally:
+        await r.aclose()
+asyncio.run(main())
+[END CODE]
+ผลที่คาดหวัง: ขึ้นกับบริการที่เตรียมไว้; ตรวจ syntax เท่านั้น
+ผลเมื่อบริการพร้อม: 14; ตัวอย่างรอบเดียว ไม่ใช่ long-running worker/recovery
+
+[TPL-API] FastAPI และ WebSocket echo
+ใช้เมื่อ: โจทย์สร้าง API หรือรับข้อความต่อเนื่อง
+เปลี่ยนตรงนี้: path, payload; บันทึกเป็น answer_api.py
+[CODE TPL-API]
+import asyncio  # การรอแบบ async
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+app = FastAPI()
+@app.get("/delay")
+async def delay():
+    await asyncio.sleep(0.01)
+    return {"ok": True}
+@app.websocket("/ws")
+async def echo(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            message = await ws.receive_text()
+            await ws.send_text(message)
+    except WebSocketDisconnect:
+        pass
+[END CODE]
+ผลที่คาดหวัง: ขึ้นกับบริการที่เตรียมไว้; ตรวจ syntax เท่านั้น
+
+รัน TPL-API: python -m uvicorn answer_api:app --port 8000
+GET http://127.0.0.1:8000/delay -> {"ok": true}
+WebSocket ws://127.0.0.1:8000/ws -> ส่ง hello รับ hello
+ต้องมี FastAPI/Uvicorn; syntax ผ่าน แต่ไม่ได้รัน server ในการตรวจครั้งนี้
+
+[TPL-CHECK] ตรวจคำตอบก่อนส่ง
+- มี import และ entry point ตามรูปแบบที่โจทย์ต้องการไหม?
+- coroutine ถูก await/schedule และ task ทั้งหมดมีผู้รอหรือ cleanup ไหม?
+- output/return ชื่อฟังก์ชัน และ parameter ตรงข้อกำหนดไหม?
+- success/error/timeout/cancel มี resource cleanup ไหม?
+- อย่าเพิ่ม print ถ้าโจทย์ให้ return อย่างเดียวหรือมีระบบตรวจ output เป๊ะ
+- ตัวอย่าง local input ผ่านไม่ได้ยืนยันระบบ network จริง
+
+แหล่งเทียบรูปแบบ: Week3/task_*.py, Week7/server.py, Week8/01–08,
+Week9/student2_pit_strategy_engineer.py และ Week10/bot.py

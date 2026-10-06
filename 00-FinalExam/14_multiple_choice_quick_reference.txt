@@ -1,0 +1,93 @@
+พาร์ท 1 — กา: กฎตัดสินตัวเลือกเร็ว
+========================================================================
+
+วิธีใช้: ค้น MC ตามคำในโจทย์ ตรวจเงื่อนไขก่อนเลือกคำตอบสองข้อ
+สำหรับ Python 3.12 และ event loop มาตรฐาน; ไม่มี eager task factory
+คำว่า "เสมอ / ทุกครั้ง / ทันที / ทุก process / รับประกัน" ต้องตรวจเป็นพิเศษ
+
+[MC-ASYNC] synchronous / concurrent / parallel / CPU / I/O
+ถูก: Concurrent คือหลายงานมีช่วงชีวิตทับซ้อน อาจสลับบน thread เดียว
+ถูก: Parallel คือทำพร้อมกันจริง เช่นหลาย core
+ผิด: async def ทำให้ CPU loop parallel อัตโนมัติ
+ผิด: I/O ทุกตัวไม่บล็อกเพียงเพราะอยู่ใน coroutine
+เทียบ: time.sleep บล็อก thread; await asyncio.sleep พักงานและให้ loop เดิน
+ข้อยกเว้น: FastAPI path operation def ถูกจัดเข้ thread pool ไม่เหมือน helper
+def ที่ถูกเรียกตรงจาก async handler
+
+[MC-CORO] coroutine / await / event loop
+f เป็น coroutine function; f() เป็น coroutine object; ยังไม่ schedule เอง
+await f() รันและรอ; create_task(f()) schedule แล้วคืน Task
+await ไม่จำเป็นต้องพักทุกครั้ง ถ้า awaitable พร้อมแล้วอาจทำต่อทันที
+run(main()) ใช้ในสคริปต์; ห้ามซ้อนบน thread ที่มี running event loop
+Task/Future เป็น awaitable; list/dict/int ปกติไม่ใช่ awaitable
+
+[MC-TASK] done / result / exception / cancel
+done() เป็น True เมื่อจบ รวมการยกเลิกที่เสร็จแล้ว
+result() ก่อนจบ -> InvalidStateError; หลัง fail -> raise exception เดิม
+result()/exception() ของ cancelled task -> CancelledError
+cancel() ขอให้ยกเลิก ไม่ใช่ kill ทันที; ต้องรอ cleanup
+CancelledError ใน Python 3.12 เป็น BaseException ไม่ใช่ Exception
+
+[MC-GATHER] gather / ลำดับ / exception
+ผลของ gather เรียง input แม้งานเสร็จคนละลำดับ
+ค่าเริ่มต้นส่ง exception แรกให้ผู้ await ไม่ cancel พี่น้องเพราะ error นี้เอง
+return_exceptions=True คืน error ใน list ต้องตรวจ ไม่ใช่ลบ error
+gather ถูก cancel -> งานที่ยังไม่จบภายในถูก cancel
+TaskGroup ใช้การจัดการ failure ต่างจาก gather; อย่ารวมเป็นกฎเดียวกัน
+
+[MC-WAIT] wait / FIRST_COMPLETED / timeout
+wait คืน (done, pending) เป็น set ไม่มีลำดับ input
+Python 3.12 ต้องส่ง Task/Future ไม่ใช่ raw coroutine
+FIRST_COMPLETED อาจได้ done หลายงาน ณ เวลาที่กลับมาทำต่อ
+wait timeout ไม่ cancel pending และไม่ raise TimeoutError เพียงเพราะ timeout
+wait_for timeout ปกติ cancel งาน รอการยกเลิก แล้ว raise TimeoutError
+เวลา wait_for อาจมากกว่า timeout; remote side effect ไม่ rollback ให้อัตโนมัติ
+
+[MC-LOCK] shared state / race condition / critical section
+thread เดียวเกิด race ได้ ถ้าพักระหว่างอ่านและเขียนข้อมูลร่วม
+ต้องล็อกทั้งชุดตรวจและเปลี่ยน ไม่ใช่ล็อกแค่ assignment หลังอ่านค่าเก่า
+ทุกผู้แก้ state ต้องใช้ lock ตัวเดียวกัน; lock แยกแต่ละ request ไม่ช่วยกัน
+asyncio.Lock จำกัด task ภายใน loop ไม่ประสานหลาย worker process
+acquire ต้อง await; release ไม่ await; async with ช่วย release ตอนออก
+Lock ไม่รับประกันไม่มี deadlock และไม่รับประกันคำขอ network สำเร็จ
+
+[MC-QUEUE] FIFO / maxsize / task_done / join
+FIFO เป็นลำดับ dequeue ไม่ใช่ลำดับเสร็จของหลาย consumer
+put/get ต้อง await; task_done/put_nowait/get_nowait ไม่ await
+get นำ item ออก แต่ไม่ลด unfinished count; task_done ต่างหากที่ลด
+empty=True อาจยังมีงานที่ worker ถืออยู่; join จึงยังรอได้
+maxsize จำกัด item ในคิว ไม่ใช่จำนวน worker; <=0 คือไม่จำกัด
+join ไม่หยุด worker ไม่ยืนยันว่า business operation สำเร็จ
+sentinel เป็น item ที่ put จึงมี task_done เช่นเดียวกัน
+
+[MC-HTTP] HTTPX / FastAPI / WebSocket
+await client.get/post; response.json และ raise_for_status ไม่ await
+HTTP 200 อาจมี application status ที่ไม่สำเร็จ ต้องอ่าน body
+WebSocket เปิด connection เพื่อหลายข้อความ ไม่ให้ replay Redis อัตโนมัติ
+connection ต้อง accept และต้องจัดการ disconnect
+
+[MC-REDIS] Redis / PubSub / Streams / XACK
+Pub/Sub live broadcast ไม่มี history/replay ให้ offline subscriber
+Stream เก็บ log แต่ความทนทานขึ้นกับ retention/persistence/configuration
+group เดียวแบ่งงาน; ต่าง group มีตำแหน่งอ่านแยกกัน
+XREADGROUP ใช้ > สำหรับงานใหม่ ไม่ใช่ pending recovery ทั้งหมด
+XACK ล้าง pending ของ group ไม่ใช่ลบ entry จาก Stream
+id=$ ตอนสร้าง group เริ่มท้ายปัจจุบัน; id=0 ใช้อ่านของเก่า
+at-least-once ต้องมีกลไก recovery; อาจทำซ้ำ ต้อง idempotency
+INCR atomic; GET แล้ว SET สองคำสั่งไม่ได้ atomic อัตโนมัติ
+
+[MC-TANK] Tank Battle ตามโค้ด repo
+game:commands = action เข้า server; game:state = state ออกจาก server
+server คุมกฎ/physics; Redis เป็นตัวกลาง; browser รับผ่าน WebSocket
+server.py ใช้ TICK_RATE=0.2 หรือเป้าหมาย 5 tick/s ก่อน overhead
+tank.py ใช้ Redis synchronous ไม่ใช่ว่าทั้งระบบเป็น coroutine
+cooldown เป็นข้อจำกัดจังหวะ action ไม่ใช่ mutual exclusion
+
+[MC-TIME] สูตรประมาณเวลาและอ่านลำดับ
+await A(); await B() งานรออิสระ -> ประมาณ tA+tB
+สร้าง task ทั้งสองก่อนแล้ว await tA; await tB -> ไม่กลายเป็น sequential
+gather(A(),B()) -> ประมาณ max(tA,tB) เมื่อไม่มีคอขวด/dependency
+Lock ครอบ await ยาวของทุกงาน -> ช่วงนั้นเรียงกัน
+print ก่อน/หลัง await ต้องไล่ scheduling; ถ้าไม่แน่นอนให้ระบุสิ่งที่รับประกัน
+
+อ่านละเอียด: 03, 04, 07, 08, 09; ฝึกเลือกสองข้อ: 13
